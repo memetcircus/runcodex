@@ -1,0 +1,49 @@
+- !<AssetImportMetadata/52a5b87e-0783-40c4-8d8c-8fd51e7a83b4>
+  ImportedAssetIds:
+    TypeScriptAsset: !<reference> 9a76d2aa-d2cc-4e54-8027-69607966492e
+  ImporterName: TypeScriptAssetImporter
+  PrimaryAsset: !<reference> 9a76d2aa-d2cc-4e54-8027-69607966492e
+  PackageType: NotAPackage
+  LegacyPackagePolicy: ~
+  ExtraData:
+    {}
+  AssetDataMap:
+    TypeScriptAsset: !<own> 848c089a-6dfa-40fb-bbd0-89e7dfd616f5
+  DependentFiles:
+    []
+  ImporterSettings: !<AssetImporterSettings>
+    {}
+  CompressionSettings: !<own> 00000000-0000-0000-0000-000000000000
+- !<TypeScriptAssetData/848c089a-6dfa-40fb-bbd0-89e7dfd616f5>
+  SvgIcon: ""
+  SetupScript:
+    code: ""
+  Description: ""
+  VersionMajor: 0
+  VersionMinor: 0
+  VersionPatch: 0
+  VersionPrerelease: ""
+  UpdateOrder: 0
+  ComponentUid: 6ec2f48b-8b06-4ba0-8801-3fb719cfb474
+  ExportUid: 00000000-0000-0000-0000-000000000000
+  PackagePolicy: CanBeUnpacked
+  ScriptInputsHidden:
+    bridgeToken: false
+    bridgeUrl: false
+  ScriptTypesHidden:
+    {}
+  ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
+  DeclarationFile: !<reference> 00000000-0000-0000-0000-000000000000
+  Tags:
+    []
+  Attachments:
+    []
+  DefaultScriptInputs:
+    - bridgeUrl: ""
+      bridgeToken: ""
+  ScriptTypes:
+    -
+      {}
+  InputLines:
+    - '// @input string bridgeUrl {"label":"Local Codex bridge WebSocket URL"}'
+    - '// @input string bridgeToken {"label":"Local Codex bridge pairing token"}'
