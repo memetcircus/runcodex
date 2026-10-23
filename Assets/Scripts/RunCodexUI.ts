@@ -76,6 +76,7 @@ export class RunCodexUI extends BaseScriptComponent {
   private opaqueBackdrop!: SceneObject
   private liveMode = false
   private liveConnected = false
+  private liveDisconnectRequested = false
   private liveSocket: WebSocket | null = null
   private liveThreadId = ""
   private liveApprovalId: number | string | null = null
@@ -175,7 +176,7 @@ export class RunCodexUI extends BaseScriptComponent {
         this.liveThreadId = ""
         this.liveApprovalId = null
         this.setConnectionLabel(LIVE_OFFLINE_LABEL)
-        this.reconnectEvent.reset(4)
+        if (!this.liveDisconnectRequested) this.reconnectEvent.reset(4)
       }
     } catch (error) {
       this.liveConnected = false
@@ -202,8 +203,17 @@ export class RunCodexUI extends BaseScriptComponent {
       if (message.params?.threadId && message.params.threadId !== this.liveThreadId) return
       this.liveApprovalId = message.id
       this.liveApprovalMethod = message.method
-      const detail = message.params?.reason || message.params?.command || (message.method === "item/fileChange/requestApproval" ? "Codex requests approval to change files." : "Codex requests approval to run a command.")
-      this.findText("ApprovalExplanation").text = "LIVE CODEX APPROVAL\n" + String(detail).slice(0, 110)
+      const reason = this.formatApprovalValue(message.params?.reason)
+      const detail = reason ||
+        (message.method === "item/fileChange/requestApproval" ? "Codex requests approval to change files." : "Codex requests approval to run a command.")
+      const maxApprovalTextLength = 240
+      const visibleDetail = detail.length > maxApprovalTextLength ? detail.slice(0, maxApprovalTextLength - 1).trimEnd() + "…" : detail
+      const approvalExplanation = this.findText("ApprovalExplanation")
+      approvalExplanation.text = "LIVE CODEX APPROVAL\n" + visibleDetail
+      approvalExplanation.size = 48
+      approvalExplanation.layoutRect = Rect.create(-11.5, 11.5, -3.5, 3.5)
+      const approvalExplanationItem = this.approvalText.getComponent(FlexItem.getTypeName()) as FlexItem
+      approvalExplanationItem.overrideHeight = 7
       this.findText("ApprovalFeedback").text = "Review the request, then choose Approve or Reject."
       this.state = "Needs approval"
       this.refreshState()
@@ -231,7 +241,11 @@ export class RunCodexUI extends BaseScriptComponent {
           this.setConnectionLabel("NO TASK IN THIS PROJECT")
           return
         }
-        const thread = threads[0]
+        // Prefer an approval that is already waiting in this project. The
+        // first item can be an unrelated, recently active task and hide it.
+        const thread = threads.find((candidate: any) =>
+          Array.isArray(candidate.status?.activeFlags) && candidate.status.activeFlags.includes("waitingOnApproval")
+        ) || threads[0]
         this.liveThreadId = thread.id
         this.findText("TaskName").text = thread.name || "Codex task"
         this.findText("TaskDescription").text = "Live Codex session · this project"
@@ -301,6 +315,13 @@ export class RunCodexUI extends BaseScriptComponent {
     return ""
   }
 
+  private formatApprovalValue(value: any): string {
+    if (typeof value === "string") return value.trim()
+    if (Array.isArray(value)) return value.map((part) => this.formatApprovalValue(part)).filter((part) => part.length > 0).join(" ")
+    if (value && typeof value === "object") return JSON.stringify(value)
+    return ""
+  }
+
   private setLiveSummary(summary: string): void {
     this.liveSummary = summary.slice(-12000)
     this.summaryLines = this.wrapSummaryLines(this.liveSummary)
@@ -338,7 +359,14 @@ export class RunCodexUI extends BaseScriptComponent {
     label.textSize = 56
     label.sizeOverride = new vec2(27, 7)
     label.contentAlignment = "center"
-    button.onTriggerUp.add(() => { this.panel.enabled = true; this.launcher.enabled = false })
+    button.onTriggerUp.add(() => {
+      this.panel.enabled = true
+      this.launcher.enabled = false
+      if (this.liveMode && !this.liveConnected) {
+        this.liveDisconnectRequested = false
+        this.connectLiveBridge()
+      }
+    })
 
     const sampleTag = global.scene.createSceneObject("ExternalSampleDataLabel")
     sampleTag.setParent(root)
@@ -441,7 +469,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.statusText = this.addText(flex, "TaskStatus", "Working", 27, 2, 61)
     this.addText(flex, "TaskDescription", "Small coding task · Preview sample", 27, 1.7, 43)
 
-    this.approvalText = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 6, 43).getSceneObject()
+    this.approvalText = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 7, 48).getSceneObject()
     const approvalButtons = this.createButtonRow(flex, "ApprovalButtonsRow", 27, 5)
     this.approvalButtonRow = approvalButtons.getSceneObject()
     this.approveButton = this.addButton(approvalButtons, "ApproveButton", "Approve", 12.8, () => this.approve(), 5)
@@ -490,8 +518,11 @@ export class RunCodexUI extends BaseScriptComponent {
     this.flexRows.push(this.refreshToActionsSpacer)
     const actions = this.createButtonRow(flex, "PanelActionsRow", 27, 7)
     this.actionsRow = actions.getSceneObject()
-    this.closeButton = this.addButton(actions, "ClosePanelButton", "Close panel", 12.8, () => { this.panel.enabled = false; this.opaqueBackdrop.enabled = false; this.launcher.enabled = true }, 5)
-    this.restartButton = this.addButton(actions, "RestartSampleButton", "Restart sample", 12.8, () => this.restart(), 5)
+    this.closeButton = this.addButton(actions, "ClosePanelButton", "Close panel", 12.8, () => this.closePanel(), 5)
+    this.restartButton = this.addButton(actions, "RestartSampleButton", "Restart sample", 12.8, () => {
+      if (this.liveMode) this.closeRunCodex()
+      else this.restart()
+    }, 5)
   }
 
   private createButtonRow(parent: FlexLayout, name: string, width: number, height: number): FlexLayout {
@@ -599,6 +630,26 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryText.enabled = false
     this.showingFullSummary = false
     this.refreshState()
+  }
+
+  private closePanel(): void {
+    this.panel.enabled = false
+    this.opaqueBackdrop.enabled = false
+    this.launcher.enabled = true
+  }
+
+  private closeRunCodex(): void {
+    this.liveDisconnectRequested = true
+    if (this.liveSocket) {
+      this.liveSocket.close()
+      this.liveSocket = null
+    }
+    this.liveConnected = false
+    this.liveThreadId = ""
+    this.liveApprovalId = null
+    this.liveApprovalMethod = ""
+    this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+    this.closePanel()
   }
 
   private refreshState(): void {

@@ -13,6 +13,7 @@ const token = process.env.RUNCODEX_BRIDGE_TOKEN ?? randomBytes(24).toString('bas
 const allowedMethods = new Set(['initialize', 'initialized', 'thread/list', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/resume', 'turn/start', 'turn/interrupt'])
 const allowedThreadIds = new Set()
 const pendingApprovals = new Set()
+const pendingApprovalMessages = new Map()
 let pairedClient = null
 let nextRpcId = 700000
 let codexReady = false
@@ -63,7 +64,6 @@ function dropClient(code = 1000, reason = 'Disconnected') {
   } catch {}
   pairedClient.destroy()
   pairedClient = null
-  pendingApprovals.clear()
 }
 
 function forwardRpc(message) {
@@ -78,6 +78,7 @@ function forwardRpc(message) {
       return
     }
     pendingApprovals.delete(id)
+    pendingApprovalMessages.delete(id)
     codexSocket.write(frame(1, JSON.stringify(message), true))
     return
   }
@@ -105,11 +106,22 @@ function forwardRpc(message) {
     message.id = rpcId
   }
   codexSocket.write(frame(1, JSON.stringify(message), true))
+  // App-server approval requests are notifications and can arrive before the
+  // Lens has selected their thread. Replay a still-pending request on resume.
+  if (message.method === 'thread/resume') {
+    for (const approval of pendingApprovalMessages.values()) {
+      if (approval.params?.threadId === params.threadId) sendClient(approval)
+    }
+  }
 }
 
 function handleCodexMessage(message) {
   if (['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(message.method)) {
-    if (message.id !== undefined) pendingApprovals.add(String(message.id))
+    if (message.id !== undefined) {
+      const id = String(message.id)
+      pendingApprovals.add(id)
+      pendingApprovalMessages.set(id, message)
+    }
     sendClient(message)
     return
   }
