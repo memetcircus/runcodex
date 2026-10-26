@@ -48,17 +48,18 @@ export class RunCodexUI extends BaseScriptComponent {
   private refreshToActionsSpacer: {item: FlexItem, sceneObject: SceneObject} | null = null
   private approved = false
   private statusText!: Text
+  private taskDescriptionText!: Text
   private approvalText!: SceneObject
   private summaryText!: SceneObject
   private summaryTextComponent!: Text
   private summaryHeadingRow!: SceneObject
+  private summaryHeadingText!: Text
   private summaryViewport!: SceneObject
   private summaryViewportBackdrop!: SceneObject
   private summaryViewportSurface!: RoundedRectangle
   private summaryProgressText!: Text
   private approveButton!: SceneObject
   private rejectButton!: SceneObject
-  private readSummaryButton!: SceneObject
   private summaryLines: string[] = []
   private summaryLineOffset = 0
   private handProvider = HandInputData.getInstance()
@@ -70,12 +71,28 @@ export class RunCodexUI extends BaseScriptComponent {
   private previewTouchActive = false
   private previewTouchLastY = 0
   private previewTouchRemainder = 0
-  private showingFullSummary = false
+  private showingFullSummary = true
   private advanceButton!: SceneObject
+  private liveActionsRow!: SceneObject
+  private composeButton!: SceneObject
+  private sendButton!: SceneObject
+  private lastUserMessageText!: SceneObject
+  private lastUserMessage = ""
+  private messageDraft = ""
+  private finalizedVoiceText = ""
+  private composerOpen = false
+  private wasShowingFullSummaryBeforeCompose = false
+  private pendingSendRpcId: number | null = null
+  private pendingSendText = ""
+  private currentTurnId = ""
+  private sendTimeoutEvent!: DelayedCallbackEvent
+  private voiceCaptureActive = false
+  private asrModule: AsrModule | null = null
   private surface!: RoundedRectangle
   private opaqueBackdrop!: SceneObject
   private liveMode = false
   private liveConnected = false
+  private codexReady = false
   private liveDisconnectRequested = false
   private liveSocket: WebSocket | null = null
   private liveThreadId = ""
@@ -113,6 +130,16 @@ export class RunCodexUI extends BaseScriptComponent {
     })
     this.reconnectEvent = this.createEvent("DelayedCallbackEvent") as DelayedCallbackEvent
     this.reconnectEvent.bind(() => this.connectLiveBridge())
+    this.sendTimeoutEvent = this.createEvent("DelayedCallbackEvent") as DelayedCallbackEvent
+    this.sendTimeoutEvent.bind(() => {
+      if (this.pendingSendRpcId === null) return
+      this.pendingSendRpcId = null
+      this.messageDraft = this.pendingSendText
+      this.pendingSendText = ""
+      this.findText("ApprovalFeedback").text = "Codex did not respond in time. Your draft is ready to retry."
+      this.refreshState()
+      this.updateLiveContentView()
+    })
   }
 
   onStart(): void {
@@ -136,6 +163,7 @@ export class RunCodexUI extends BaseScriptComponent {
       this.setConnectionLabel(LIVE_CONNECTING_LABEL)
       this.connectLiveBridge()
     }
+    this.refreshState()
   }
 
   private setTextStyleTree(root: SceneObject, color: vec4): void {
@@ -159,7 +187,8 @@ export class RunCodexUI extends BaseScriptComponent {
       this.liveSocket = socket
       socket.onopen = () => {
         this.liveConnected = true
-        this.setConnectionLabel(LIVE_CONNECTED_LABEL)
+        this.codexReady = false
+        this.setConnectionLabel(LIVE_CONNECTING_LABEL)
         this.sendLiveRpc("initialize", {
           clientInfo: {name: "runcodex_specs", title: "RunCodex for SPECS", version: "0.1.0"}
         })
@@ -168,21 +197,35 @@ export class RunCodexUI extends BaseScriptComponent {
         if (typeof event.data === "string") this.handleLiveMessage(event.data)
       }
       socket.onerror = () => {
-        this.liveConnected = false
-        this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+        this.handleBridgeDisconnected()
       }
       socket.onclose = () => {
-        this.liveConnected = false
         this.liveThreadId = ""
         this.liveApprovalId = null
-        this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+        this.handleBridgeDisconnected()
         if (!this.liveDisconnectRequested) this.reconnectEvent.reset(4)
       }
     } catch (error) {
-      this.liveConnected = false
-      this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+      this.handleBridgeDisconnected()
       print("[RunCodex] Bridge connection failed: " + error)
       this.reconnectEvent.reset(4)
+    }
+  }
+
+  private handleBridgeDisconnected(): void {
+    this.liveConnected = false
+    this.codexReady = false
+    this.currentTurnId = ""
+    this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+    if (this.pendingSendRpcId !== null) {
+      this.pendingSendRpcId = null
+      this.messageDraft = this.pendingSendText
+      this.pendingSendText = ""
+      this.findText("ApprovalFeedback").text = "Bridge disconnected. Your draft is ready to retry."
+    }
+    if (this.liveMode && this.contentFlex) {
+      this.refreshState()
+      this.updateLiveContentView()
     }
   }
 
@@ -221,18 +264,33 @@ export class RunCodexUI extends BaseScriptComponent {
     }
 
     if (message.id !== undefined && this.liveRpcMethods[String(message.id)]) {
-      const method = this.liveRpcMethods[String(message.id)]
-      delete this.liveRpcMethods[String(message.id)]
+      const rpcId = String(message.id)
+      const method = this.liveRpcMethods[rpcId]
+      delete this.liveRpcMethods[rpcId]
       if (message.error) {
         if (method === "initialize" && String(message.error.message || "").toLowerCase().includes("already initialized")) {
+          this.codexReady = true
           this.sendLiveRpc("thread/list", {limit: 50})
           return
         }
         print("[RunCodex] Codex bridge RPC failed (" + method + "): " + message.error.message)
+        if (method === "initialize") {
+          this.codexReady = false
+          this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+        }
         if (method === "thread/list") this.setConnectionLabel("NO TASK IN THIS PROJECT")
+        if ((method === "turn/start" || method === "turn/steer") && this.pendingSendRpcId === Number(message.id)) {
+          this.pendingSendRpcId = null
+          this.messageDraft = this.pendingSendText
+          this.pendingSendText = ""
+          this.findText("ApprovalFeedback").text = "Could not send: " + String(message.error.message || "Codex rejected the message").slice(0, 110)
+          this.refreshState()
+          this.updateLiveContentView()
+        }
         return
       }
       if (method === "initialize") {
+        this.codexReady = true
         this.liveSocket?.send(JSON.stringify({method: "initialized", params: {}}))
         this.sendLiveRpc("thread/list", {limit: 50})
       } else if (method === "thread/list") {
@@ -247,6 +305,7 @@ export class RunCodexUI extends BaseScriptComponent {
           Array.isArray(candidate.status?.activeFlags) && candidate.status.activeFlags.includes("waitingOnApproval")
         ) || threads[0]
         this.liveThreadId = thread.id
+        this.setConnectionLabel(LIVE_CONNECTED_LABEL)
         this.findText("TaskName").text = thread.name || "Codex task"
         this.findText("TaskDescription").text = "Live Codex session · this project"
         this.syncThreadStatus(thread.status)
@@ -254,6 +313,26 @@ export class RunCodexUI extends BaseScriptComponent {
         this.sendLiveRpc("thread/turns/list", {threadId: thread.id, limit: 1, sortDirection: "desc", itemsView: "full"})
       } else if (method === "thread/turns/list") {
         this.readLiveTurnSummary(message.result?.data || [])
+      } else if ((method === "turn/start" || method === "turn/steer") && this.pendingSendRpcId === Number(message.id)) {
+        const sentText = this.pendingSendText
+        const returnedTurnId = message.result?.turn?.id || message.result?.turnId
+        if (returnedTurnId) this.currentTurnId = returnedTurnId
+        this.pendingSendRpcId = null
+        this.sendTimeoutEvent.reset(0)
+        this.pendingSendText = ""
+        this.messageDraft = ""
+        this.composerOpen = false
+        this.lastUserMessage = sentText
+      ;(this.lastUserMessageText.getComponent("Component.Text") as Text).text = "YOU  ·  " + sentText
+        this.liveSummary = ""
+        this.summaryLines = []
+        this.summaryLineOffset = 0
+        this.showingFullSummary = true
+        this.state = "Working"
+        this.findText("ApprovalFeedback").text = "Message sent to Codex."
+        this.refreshState()
+        this.updateLiveContentView()
+        if (this.voiceCaptureActive) this.stopVoiceCapture("Message sent to Codex.")
       }
       return
     }
@@ -262,20 +341,35 @@ export class RunCodexUI extends BaseScriptComponent {
     const params = message.params || {}
     if (params.threadId && params.threadId !== this.liveThreadId) return
     if (message.method === "turn/started") {
+      this.currentTurnId = params.turn?.id || this.currentTurnId
+      this.liveSummary = ""
+      this.summaryLines = []
+      this.summaryLineOffset = 0
+      this.showingFullSummary = true
       this.state = "Working"
       this.refreshState()
+      this.updateLiveContentView()
     } else if (message.method === "turn/completed") {
       const turnStatus = params.turn?.status
+      this.currentTurnId = ""
+      this.showingFullSummary = true
       if (turnStatus === "completed") this.state = "Done"
       else this.state = "Working"
       this.refreshState()
     } else if (message.method === "item/agentMessage/delta") {
       this.liveSummary += params.delta || ""
       this.summaryLines = this.wrapSummaryLines(this.liveSummary)
+      this.showingFullSummary = true
+      this.summaryLineOffset = Math.max(0, this.summaryLines.length - SUMMARY_VISIBLE_LINES)
       this.updateSummaryView()
+      this.refreshState()
     } else if (message.method === "item/completed" && params.item?.type === "agentMessage") {
       const finalText = this.messageText(params.item)
-      if (finalText) this.setLiveSummary(finalText)
+      if (finalText) {
+        this.setLiveSummary(finalText)
+        if (this.state === "Done") this.showingFullSummary = true
+        this.refreshState()
+      }
     } else if (message.method === "serverRequest/resolved" && this.liveApprovalId !== null) {
       this.liveApprovalId = null
       this.liveApprovalMethod = ""
@@ -292,19 +386,24 @@ export class RunCodexUI extends BaseScriptComponent {
     if (!turns.length) return
     const turn = turns[0].turn || turns[0]
     const items = turn.items || turns[0].items || []
+    if (turn.status === "inProgress" || turn.status === "in_progress") this.currentTurnId = turn.id || ""
     for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i]?.type === "agentMessage") {
+      if (items[i]?.type === "userMessage") {
+        const userText = this.messageText(items[i])
+        if (userText) {
+          this.lastUserMessage = userText
+          ;(this.lastUserMessageText.getComponent("Component.Text") as Text).text = "YOU  ·  " + userText.slice(0, 180)
+        }
+      } else if (items[i]?.type === "agentMessage") {
         const text = this.messageText(items[i])
         if (text) {
           this.setLiveSummary(text)
-          if (turn.status === "completed") {
-            this.state = "Done"
-            this.refreshState()
-          }
-          return
         }
       }
     }
+    if (turn.status === "completed") this.state = "Done"
+    else if (this.currentTurnId) this.state = "Working"
+    this.refreshState()
   }
 
   private messageText(item: any): string {
@@ -362,9 +461,12 @@ export class RunCodexUI extends BaseScriptComponent {
     button.onTriggerUp.add(() => {
       this.panel.enabled = true
       this.launcher.enabled = false
-      if (this.liveMode && !this.liveConnected) {
+    if (this.liveMode && (!this.liveConnected || !this.codexReady)) {
         this.liveDisconnectRequested = false
-        this.connectLiveBridge()
+        if (this.liveConnected) this.sendLiveRpc("initialize", {
+          clientInfo: {name: "runcodex_specs", title: "RunCodex for SPECS", version: "0.1.0"}
+        })
+        else this.connectLiveBridge()
       }
     })
 
@@ -398,7 +500,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.opaqueBackdrop = this.findObject("RunCodexOpaqueBackdrop")
     this.opaqueBackdrop.setParent(this.panel)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
-    this.opaqueBackdrop.getTransform().setLocalScale(new vec3(32, 44, 1))
+    this.opaqueBackdrop.getTransform().setLocalScale(new vec3(32, 54, 1))
     this.opaqueBackdrop.enabled = false
     const opaqueVisual = this.opaqueBackdrop.getComponent("Component.RenderMeshVisual") as RenderMeshVisual
     // This backdrop material can have no main pass in the recovered scene.
@@ -411,7 +513,7 @@ export class RunCodexUI extends BaseScriptComponent {
     backdrop.getTransform().setLocalPosition(new vec3(0, 0, 0))
     this.surface = backdrop.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
     this.surface.initialize()
-    this.surface.size = new vec2(32, 44)
+    this.surface.size = new vec2(32, 54)
     this.surface.setBackgroundGradient({
       enabled: true,
       type: "Linear",
@@ -433,7 +535,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const flex = content.createComponent(FlexLayout.getTypeName()) as FlexLayout
     flex.autoDiscoverItemsOnStart = false
     flex.width = 29
-    flex.height = 42
+    flex.height = 52
     flex.direction = FlexDirection.Column
     flex.justifyContent = FlexJustify.Start
     flex.alignItems = FlexAlign.Stretch
@@ -467,7 +569,9 @@ export class RunCodexUI extends BaseScriptComponent {
     this.addText(flex, "SampleDataLabel", SAMPLE_LABEL, 27, 2.2, 52)
     this.addText(flex, "TaskName", TASK_NAME, 27, 2.1, 62)
     this.statusText = this.addText(flex, "TaskStatus", "Working", 27, 2, 61)
-    this.addText(flex, "TaskDescription", "Small coding task · Preview sample", 27, 1.7, 43)
+    this.taskDescriptionText = this.addText(flex, "TaskDescription", "Small coding task · Preview sample", 27, 1.7, 43)
+    this.lastUserMessageText = this.addText(flex, "LastUserMessage", "", 27, 2.4, 34).getSceneObject()
+    this.lastUserMessageText.enabled = false
 
     this.approvalText = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 7, 48).getSceneObject()
     const approvalButtons = this.createButtonRow(flex, "ApprovalButtonsRow", 27, 5)
@@ -477,10 +581,8 @@ export class RunCodexUI extends BaseScriptComponent {
     this.feedbackText = this.addText(flex, "ApprovalFeedback", "", 27, 2.7, 42).getSceneObject()
     const summaryHeading = this.createButtonRow(flex, "SummaryHeadingRow", 27, 3.2)
     this.summaryHeadingRow = summaryHeading.getSceneObject()
-    const heading = this.addText(summaryHeading, "SummaryHeading", "SUMMARY", 13, 3.2, 35)
-    heading.textFill.color = new vec4(0.72, 0.88, 0.98, 1)
-    this.readSummaryButton = this.addButton(summaryHeading, "ReadSummaryButton", "Read summary", 8, () => this.toggleFullSummary(), 2.8, 36)
-
+    this.summaryHeadingText = this.addText(summaryHeading, "SummaryHeading", "SUMMARY", 13, 3.2, 35)
+    this.summaryHeadingText.textFill.color = new vec4(0.72, 0.88, 0.98, 1)
     this.summaryTextComponent = this.addText(flex, "CompletionSummary", "", 27, SUMMARY_VIEWPORT_HEIGHT, 44)
     this.summaryText = this.summaryTextComponent.getSceneObject()
     this.summaryTextComponent.weight = 500
@@ -507,6 +609,11 @@ export class RunCodexUI extends BaseScriptComponent {
     spacerItem.overrideHeight = 0
     this.actionGroupSpacer = {item: spacerItem, sceneObject: spacerObject}
     this.flexRows.push(this.actionGroupSpacer)
+    const liveActions = this.createButtonRow(flex, "LiveActionsRow", 27, 5)
+    this.liveActionsRow = liveActions.getSceneObject()
+    this.addButton(liveActions, "RefreshCodexStatusButton", "Refresh Codex status", 13.2, () => this.advance(), 5, 28)
+    this.composeButton = this.addButton(liveActions, "ComposeMessageButton", "Speak", 6.5, () => this.openComposer(), 5, 32)
+    this.sendButton = this.addButton(liveActions, "SendMessageButton", "Send", 6.5, () => this.sendLiveMessage(), 5, 34)
     this.advanceButton = this.addButton(flex, "AdvanceSampleButton", "Advance sample task", 27, () => this.advance(), 5)
     const refreshSpacerObject = global.scene.createSceneObject("RefreshToActionsSpacer")
     refreshSpacerObject.setParent(flex.getSceneObject())
@@ -567,7 +674,7 @@ export class RunCodexUI extends BaseScriptComponent {
     so.setParent(layout.getSceneObject())
     const button = so.createComponent(Button.getTypeName()) as Button
     const primary = name === "ApproveButton" || name === "AdvanceSampleButton"
-    const quietControl = name === "ClosePanelButton" || name === "ReadSummaryButton"
+    const quietControl = name === "ClosePanelButton"
     button.setTheme("SnapOS3", primary ? "Prism" : quietControl ? "Ghost" : "Secondary")
     button.size = new vec3(width, height, 1)
     button.onTriggerUp.add(action)
@@ -608,7 +715,10 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private advance(): void {
     if (this.liveMode) {
-      if (this.liveConnected) this.sendLiveRpc("thread/list", {limit: 50})
+      if (this.liveConnected && this.codexReady) this.sendLiveRpc("thread/list", {limit: 50})
+      else if (this.liveConnected) this.sendLiveRpc("initialize", {
+        clientInfo: {name: "runcodex_specs", title: "RunCodex for SPECS", version: "0.1.0"}
+      })
       else this.connectLiveBridge()
       return
     }
@@ -628,23 +738,26 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approved = false
     this.findText("ApprovalFeedback").text = ""
     this.summaryText.enabled = false
-    this.showingFullSummary = false
+    this.showingFullSummary = true
     this.refreshState()
   }
 
   private closePanel(): void {
+    if (this.composerOpen) this.cancelComposer()
     this.panel.enabled = false
     this.opaqueBackdrop.enabled = false
     this.launcher.enabled = true
   }
 
   private closeRunCodex(): void {
+    if (this.composerOpen) this.cancelComposer()
     this.liveDisconnectRequested = true
     if (this.liveSocket) {
       this.liveSocket.close()
       this.liveSocket = null
     }
     this.liveConnected = false
+    this.codexReady = false
     this.liveThreadId = ""
     this.liveApprovalId = null
     this.liveApprovalMethod = ""
@@ -660,29 +773,36 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approveButton.enabled = this.state === "Needs approval"
     this.rejectButton.enabled = this.state === "Needs approval"
     this.feedbackText.enabled = (this.feedbackText.getComponent("Component.Text") as Text).text.length > 0
-    this.readSummaryButton.enabled = this.state === "Done"
-    this.summaryHeadingRow.enabled = this.state === "Done"
-    this.summaryViewport.enabled = this.state === "Done"
-    this.showingFullSummary = false
-    this.summaryText.enabled = this.state === "Done"
-    this.summaryViewportBackdrop.enabled = this.state === "Done"
-    this.summaryLineOffset = 0
+    const showConversation = this.liveMode && (this.composerOpen || this.liveSummary.length > 0 || this.state === "Done")
+    const showSummary = this.state === "Done" || showConversation
+    this.summaryHeadingRow.enabled = showSummary
+    this.summaryViewport.enabled = showSummary
+    this.summaryText.enabled = showSummary
+    this.summaryViewportBackdrop.enabled = showSummary
+    this.lastUserMessageText.enabled = this.liveMode && this.lastUserMessage.length > 0
     this.updateSummaryView()
-    this.advanceButton.enabled = this.liveMode || this.state === "Working"
+    this.advanceButton.enabled = !this.liveMode && this.state === "Working"
+    this.liveActionsRow.enabled = this.liveMode
+    const composeButton = this.composeButton.getComponent(Button.getTypeName()) as Button
+    composeButton.inactive = this.pendingSendRpcId !== null
+    const sendButton = this.sendButton.getComponent(Button.getTypeName()) as Button
+    sendButton.inactive = !this.liveConnected || !this.codexReady || !this.liveThreadId || this.pendingSendRpcId !== null || this.messageDraft.trim().length === 0
     this.closeButton.enabled = true
     this.restartButton.enabled = true
     this.actionsRow.enabled = true
     this.layoutRows()
     this.resizeSurface()
-    const advanceLabel = this.advanceButton.getComponent(ElementContent.getTypeName()) as ElementContent
-    advanceLabel.text = this.liveMode ? "Refresh Codex status" : "Advance sample task"
+    const composeLabel = this.composeButton.getComponent(ElementContent.getTypeName()) as ElementContent
+    composeLabel.text = this.voiceCaptureActive ? "Stop" : "Speak"
+    const sendLabel = this.sendButton.getComponent(ElementContent.getTypeName()) as ElementContent
+    sendLabel.text = this.pendingSendRpcId !== null ? "Sending…" : "Send"
     const restartLabel = this.restartButton.getComponent(ElementContent.getTypeName()) as ElementContent
     restartLabel.text = this.liveMode ? "Close RunCodex" : "Restart sample"
   }
 
   private resizeSurface(): void {
     const width = 32
-    const height = 44
+    const height = 54
     this.surface.size = new vec2(width, height)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
     this.opaqueBackdrop.getTransform().setLocalScale(new vec3(width, height, 1))
@@ -695,13 +815,6 @@ export class RunCodexUI extends BaseScriptComponent {
     )
   }
 
-  private toggleFullSummary(): void {
-    this.showingFullSummary = !this.showingFullSummary
-    this.summaryLineOffset = 0
-    this.updateSummaryView()
-    this.layoutRows()
-  }
-
   private updateSummaryProgress(): void {
     const firstLine = Math.min(this.summaryLines.length, this.summaryLineOffset + 1)
     const lastLine = Math.min(this.summaryLines.length, this.summaryLineOffset + SUMMARY_VISIBLE_LINES)
@@ -709,7 +822,8 @@ export class RunCodexUI extends BaseScriptComponent {
   }
 
   private updateSummaryView(): void {
-    const summary = this.liveMode ? this.liveSummary : SUMMARY
+    const summary = this.composerOpen ? this.messageDraft : this.liveMode ? this.liveSummary : SUMMARY
+    this.summaryLines = this.wrapSummaryLines(summary)
     if (this.showingFullSummary) {
       const visible = this.summaryLines.slice(this.summaryLineOffset, this.summaryLineOffset + SUMMARY_VISIBLE_LINES)
       this.summaryTextComponent.text = visible.join("\n")
@@ -720,9 +834,139 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryTextComponent.verticalAlignment = VerticalAlignment.Top
     this.summaryTextComponent.verticalOverflow = VerticalOverflow.Truncate
     this.summaryTextComponent.horizontalOverflow = HorizontalOverflow.Wrap
-    const buttonLabel = this.readSummaryButton.getComponent(ElementContent.getTypeName()) as ElementContent
-    buttonLabel.text = this.showingFullSummary ? "Show less" : "Read summary"
     this.updateSummaryProgress()
+  }
+
+  private openComposer(): void {
+    if (!this.liveMode || this.pendingSendRpcId !== null) return
+    if (this.voiceCaptureActive) {
+      this.stopVoiceCapture("Recording stopped. Review the transcript, then tap Send.")
+      return
+    }
+    if (!this.composerOpen) {
+      this.composerOpen = true
+      this.wasShowingFullSummaryBeforeCompose = this.showingFullSummary
+      this.messageDraft = ""
+      this.finalizedVoiceText = ""
+    }
+    this.finalizedVoiceText = this.messageDraft.trim()
+    this.showingFullSummary = true
+    this.summaryLineOffset = 0
+    this.findText("SummaryHeading").text = "MESSAGE TO CODEX"
+    this.findText("ApprovalFeedback").text = this.liveConnected && this.codexReady && this.liveThreadId
+      ? "Tap Speak, say your message, review it, then Send."
+      : "Speak your message. The transcript will stay here until Codex reconnects."
+    this.refreshState()
+    this.updateLiveContentView()
+    try {
+      this.asrModule = require("LensStudio:AsrModule") as AsrModule
+      const options = AsrModule.AsrTranscriptionOptions.create()
+      options.mode = AsrModule.AsrMode.HighAccuracy
+      options.silenceUntilTerminationMs = 1000
+      options.onTranscriptionUpdateEvent.add((event: AsrModule.TranscriptionUpdateEvent) => {
+        if (!this.voiceCaptureActive) return
+        const segment = event.text.trim()
+        this.messageDraft = [this.finalizedVoiceText, segment].filter(Boolean).join(" ")
+        this.findText("ApprovalFeedback").text = event.isFinal
+          ? (this.liveConnected && this.codexReady && this.liveThreadId
+            ? "Phrase captured. Keep speaking or tap Stop to review."
+            : "Phrase captured. Keep speaking or tap Stop; Codex is offline.")
+          : "Listening… tap Stop when you are done speaking."
+        if (event.isFinal) this.finalizedVoiceText = this.messageDraft
+        this.updateLiveContentView()
+        this.refreshState()
+      })
+      options.onTranscriptionErrorEvent.add((code: AsrModule.AsrStatusCode) => {
+        this.voiceCaptureActive = false
+        this.messageDraft = this.messageDraft.trim()
+        const message = code === AsrModule.AsrStatusCode.NoInternet
+          ? "Voice transcription needs an internet connection. Your draft is kept."
+          : code === AsrModule.AsrStatusCode.Unauthenticated
+            ? "Speech recognition is unavailable for this account. Your draft is kept."
+            : "Speech recognition failed. Your draft is kept; tap Speak to retry."
+        this.findText("ApprovalFeedback").text = message
+        this.refreshState()
+        this.updateLiveContentView()
+        try { this.asrModule?.stopTranscribing() } catch {}
+      })
+      this.voiceCaptureActive = true
+      this.asrModule.startTranscribing(options)
+      this.findText("ApprovalFeedback").text = "Listening… tap Stop when you are done speaking."
+      this.refreshState()
+    } catch (error) {
+      this.voiceCaptureActive = false
+      this.composerOpen = false
+      this.findText("ApprovalFeedback").text = "Speech input is available on SPECS only. " + String(error).slice(0, 80)
+      this.refreshState()
+      this.updateLiveContentView()
+    }
+  }
+
+  private stopVoiceCapture(feedback: string): void {
+    if (this.voiceCaptureActive) {
+      this.voiceCaptureActive = false
+      try {
+        this.asrModule?.stopTranscribing().catch((error: any) => {
+          print("[RunCodex] ASR stop failed: " + error)
+        })
+      } catch (error) {
+        print("[RunCodex] ASR stop failed: " + error)
+      }
+    }
+    this.findText("ApprovalFeedback").text = this.messageDraft.trim().length > 0
+      ? (this.liveConnected && this.codexReady && this.liveThreadId
+        ? feedback
+        : feedback.replace("then tap Send", "Send is available when Codex reconnects"))
+      : "No speech captured. Tap Speak to try again."
+    this.refreshState()
+    this.updateLiveContentView()
+  }
+
+  private cancelComposer(): void {
+    if (!this.composerOpen) return
+    this.composerOpen = false
+    this.findText("SummaryHeading").text = "SUMMARY"
+    this.findText("ApprovalFeedback").text = "Draft kept. Tap Speak to record again, or Send to Codex."
+    this.showingFullSummary = this.wasShowingFullSummaryBeforeCompose
+    if (this.voiceCaptureActive) this.stopVoiceCapture("Draft kept. Tap Speak to continue.")
+    this.refreshState()
+    this.updateLiveContentView()
+  }
+
+  private sendLiveMessage(): void {
+    if (!this.liveConnected || !this.codexReady || !this.liveThreadId || this.pendingSendRpcId !== null) return
+    if (this.voiceCaptureActive) this.stopVoiceCapture("Sending transcript to Codex…")
+    const text = this.messageDraft.trim()
+    if (!text) {
+      this.findText("ApprovalFeedback").text = "Enter a message before sending."
+      this.refreshState()
+      return
+    }
+    if (text.length > 4000) {
+      this.findText("ApprovalFeedback").text = "Messages are limited to 4,000 characters."
+      return
+    }
+    this.pendingSendText = text
+    const params: any = {threadId: this.liveThreadId, input: [{type: "text", text}]}
+    const method = this.currentTurnId ? "turn/steer" : "turn/start"
+    if (method === "turn/steer") params.expectedTurnId = this.currentTurnId
+    this.pendingSendRpcId = this.sendLiveRpc(method, params)
+    if (this.pendingSendRpcId < 0) {
+      this.pendingSendRpcId = null
+      this.messageDraft = text
+      this.findText("ApprovalFeedback").text = "Bridge disconnected. Draft kept for retry."
+      this.refreshState()
+      return
+    }
+    this.findText("ApprovalFeedback").text = "Sending message to Codex…"
+    this.sendTimeoutEvent.reset(20)
+    this.refreshState()
+  }
+
+  private updateLiveContentView(): void {
+    if (this.composerOpen) this.findText("SummaryHeading").text = "MESSAGE TO CODEX"
+    else this.findText("SummaryHeading").text = "SUMMARY"
+    this.updateSummaryView()
   }
 
   private wrapSummaryLines(value: string): string[] {

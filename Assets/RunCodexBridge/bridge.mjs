@@ -10,10 +10,11 @@ const socketPath = process.env.CODEX_APP_SERVER_SOCKET ?? `${os.homedir()}/.code
 const host = process.env.RUNCODEX_BRIDGE_HOST ?? '0.0.0.0'
 const port = Number(process.env.RUNCODEX_BRIDGE_PORT ?? 8765)
 const token = process.env.RUNCODEX_BRIDGE_TOKEN ?? randomBytes(24).toString('base64url')
-const allowedMethods = new Set(['initialize', 'initialized', 'thread/list', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/resume', 'turn/start', 'turn/interrupt'])
+const allowedMethods = new Set(['initialize', 'initialized', 'thread/list', 'thread/turns/list', 'thread/resume', 'turn/start', 'turn/steer'])
 const allowedThreadIds = new Set()
 const pendingApprovals = new Set()
 const pendingApprovalMessages = new Map()
+const activeTurnIds = new Map()
 let pairedClient = null
 let nextRpcId = 700000
 let codexReady = false
@@ -27,6 +28,23 @@ function safeEqual(a, b) {
   const x = Buffer.from(a)
   const y = Buffer.from(b)
   return x.length === y.length && timingSafeEqual(x, y)
+}
+
+function isLocalClient(address = '') {
+  const normalized = address.toLowerCase().replace(/^::ffff:/, '')
+  if (normalized === '::1' || normalized === 'localhost') return true
+  const octets = normalized.split('.').map(Number)
+  if (octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)) {
+    const [a, b] = octets
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 169 && b === 254)
+  }
+  return normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe8') ||
+    normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')
+}
+
+function replyError(message, code, text) {
+  if (message.id !== undefined) sendClient({id: message.id, error: {code, message: text}})
 }
 
 function frame(opcode, payload, masked = false) {
@@ -88,21 +106,50 @@ function forwardRpc(message) {
   }
   const params = message.params ?? {}
   if (message.method === 'thread/list') {
-    message.params = {...params, cwd: projectRoot, archived: false, limit: 50, sortKey: 'updated_at', sortDirection: 'desc'}
+    message.params = {cwd: projectRoot, archived: false, limit: 50, sortKey: 'updated_at', sortDirection: 'desc'}
   }
-  if (['thread/read', 'thread/turns/list', 'thread/items/list', 'thread/resume', 'turn/start', 'turn/interrupt'].includes(message.method)) {
+  if (['thread/turns/list', 'thread/resume', 'turn/start', 'turn/steer'].includes(message.method)) {
     const threadId = params.threadId
     if (!threadId || !allowedThreadIds.has(threadId)) {
       sendClient({id: message.id, error: {code: -32602, message: 'Select a task from this project first'}})
       return
     }
   }
-  if (message.method === 'thread/resume') message.params = {...params, excludeTurns: true}
+  if (message.method === 'turn/start' || message.method === 'turn/steer') {
+    const threadId = params.threadId
+    const input = params.input
+    if (!Array.isArray(input) || input.length !== 1 || input[0]?.type !== 'text' || typeof input[0]?.text !== 'string') {
+      replyError(message, -32602, 'RunCodex accepts one plain-text message at a time')
+      return
+    }
+    const text = input[0].text.trim()
+    if (!text || text.length > 4000) {
+      replyError(message, -32602, 'Message must contain 1–4000 characters')
+      return
+    }
+    const activeTurnId = activeTurnIds.get(threadId)
+    if (message.method === 'turn/start' && activeTurnId) {
+      replyError(message, -32602, 'This Codex task is already working; send as a turn steer')
+      return
+    }
+    if (message.method === 'turn/steer' && (!activeTurnId || params.expectedTurnId !== activeTurnId)) {
+      replyError(message, -32602, 'The active Codex turn changed; refresh status and try again')
+      return
+    }
+    message.params = message.method === 'turn/start'
+      ? {threadId, input: [{type: 'text', text}]}
+      : {threadId, input: [{type: 'text', text}], expectedTurnId: activeTurnId}
+  }
+  if (message.method === 'thread/resume') message.params = {threadId: params.threadId, excludeTurns: true}
+  if (message.method === 'thread/turns/list') {
+    message.params = {threadId: params.threadId, limit: 1, sortDirection: 'desc', itemsView: 'full'}
+  }
   const clientId = message.id
   if (clientId !== undefined) {
     const rpcId = nextRpcId++
     pairedState.rpcIds.set(String(rpcId), clientId)
     pairedState.rpcMethods.set(String(rpcId), message.method)
+    if (params.threadId) pairedState.rpcThreads.set(String(rpcId), params.threadId)
     message.id = rpcId
   }
   codexSocket.write(frame(1, JSON.stringify(message), true))
@@ -130,6 +177,8 @@ function handleCodexMessage(message) {
     pairedState.rpcIds.delete(String(message.id))
     const method = pairedState.rpcMethods.get(String(message.id))
     pairedState.rpcMethods.delete(String(message.id))
+    const requestedThreadId = pairedState.rpcThreads.get(String(message.id))
+    pairedState.rpcThreads.delete(String(message.id))
     if (method === 'thread/list' && message.result?.data && Array.isArray(message.result.data)) {
       // thread/list was already filtered by app-server's exact cwd filter.
       allowedThreadIds.clear()
@@ -142,29 +191,50 @@ function handleCodexMessage(message) {
       }))
       message.result.nextCursor = null
     } else if (method === 'thread/turns/list' && Array.isArray(message.result?.data)) {
-      // Keep full tool outputs and raw item metadata on the host. The Lens only
-      // receives concise assistant summaries for the selected project thread.
+      // Keep tool outputs and raw metadata on the host. The Lens only receives
+      // concise plain text from the selected project thread.
       message.result.data = message.result.data.map((entry) => ({
         turn: {id: entry.turn?.id, status: entry.turn?.status},
-        items: (entry.items ?? []).filter((item) => item.type === 'agentMessage').map((item) => ({
-          type: 'agentMessage',
-          text: String(item.text ?? '').slice(0, 4000),
+        items: (entry.items ?? []).filter((item) => ['userMessage', 'agentMessage'].includes(item.type)).map((item) => ({
+          type: item.type,
+          text: String(item.text ?? item.content?.map?.((part) => part.text ?? '').join('\n') ?? '').slice(0, 4000),
         })),
       }))
+      const latestTurn = message.result.data[0]?.turn
+      if (requestedThreadId && latestTurn?.id && ['inProgress', 'in_progress'].includes(latestTurn.status)) {
+        activeTurnIds.set(requestedThreadId, latestTurn.id)
+      } else if (requestedThreadId) {
+        activeTurnIds.delete(requestedThreadId)
+      }
+    } else if (method === 'turn/start' && requestedThreadId && message.result?.turn?.id) {
+      activeTurnIds.set(requestedThreadId, message.result.turn.id)
     }
     sendClient({...message, id: clientId})
     return
   }
   if (message.method) {
     const threadId = message.params?.threadId
+    if (message.method === 'turn/started' && threadId && message.params?.turn?.id) {
+      activeTurnIds.set(threadId, message.params.turn.id)
+    } else if (message.method === 'turn/completed' && threadId) {
+      const completedTurnId = message.params?.turn?.id
+      if (!completedTurnId || activeTurnIds.get(threadId) === completedTurnId) activeTurnIds.delete(threadId)
+    }
     if (threadId && !allowedThreadIds.has(threadId)) return
     if (!allowedNotifications.has(message.method)) return
-    if (message.method === 'item/completed' && message.params?.item?.type !== 'agentMessage') return
+    if (message.method === 'item/completed') {
+      if (!['agentMessage', 'userMessage'].includes(message.params?.item?.type)) return
+      const item = message.params.item
+      message.params = {...message.params, item: {
+        type: item.type,
+        text: String(item.text ?? item.content?.map?.((part) => part.text ?? '').join('\n') ?? '').slice(0, 4000),
+      }}
+    }
     sendClient(message)
   }
 }
 
-let pairedState = {rpcIds: new Map(), rpcMethods: new Map()}
+let pairedState = {rpcIds: new Map(), rpcMethods: new Map(), rpcThreads: new Map()}
 
 function parseFrames(buffer, isMasked, onMessage, onPong) {
   let offset = 0
@@ -269,6 +339,11 @@ function localAddresses() {
 }
 
 const server = createServer((request, response) => {
+  if (!isLocalClient(request.socket.remoteAddress)) {
+    response.writeHead(403)
+    response.end()
+    return
+  }
   if (request.url === '/healthz') {
     response.writeHead(200, {'content-type': 'application/json'})
     response.end(JSON.stringify({ok: codexReady, product: 'RunCodex local bridge'}))
@@ -279,6 +354,11 @@ const server = createServer((request, response) => {
 })
 
 server.on('upgrade', (request, socket) => {
+  if (!isLocalClient(request.socket.remoteAddress)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+    socket.destroy()
+    return
+  }
   const url = new URL(request.url ?? '/', 'http://localhost')
   if (url.pathname !== '/runcodex' || !safeEqual(url.searchParams.get('token') ?? '', token)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
@@ -295,10 +375,10 @@ server.on('upgrade', (request, socket) => {
   const accept = createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
   socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n')
   pairedClient = socket
-  pairedState = {rpcIds: new Map(), rpcMethods: new Map(), clientBuffer: Buffer.alloc(0)}
+  pairedState = {rpcIds: new Map(), rpcMethods: new Map(), rpcThreads: new Map(), clientBuffer: Buffer.alloc(0)}
   socket.on('data', consumeClientData)
-  socket.on('close', () => { if (pairedClient === socket) { pairedClient = null; pendingApprovals.clear() } })
-  socket.on('error', () => { if (pairedClient === socket) { pairedClient = null; pendingApprovals.clear() } })
+  socket.on('close', () => { if (pairedClient === socket) pairedClient = null })
+  socket.on('error', () => { if (pairedClient === socket) pairedClient = null })
   console.log('[RunCodexBridge] Paired SPECS client connected')
 })
 
@@ -306,8 +386,8 @@ server.listen(port, host, () => {
   console.log('[RunCodexBridge] Development-only unencrypted WebSocket on the local Wi-Fi network.')
   console.log('[RunCodexBridge] Project filter:', projectRoot)
   console.log('[RunCodexBridge] Endpoints:', localAddresses().map((ip) => `ws://${ip}:${port}/runcodex`).join('  '))
-  console.log('[RunCodexBridge] Pairing token:', token)
-  console.log('[RunCodexBridge] Keep the token private; stop the bridge with Ctrl+C.')
+  console.log('[RunCodexBridge] Pairing token loaded from the local environment; keep it private.')
+  console.log('[RunCodexBridge] Stop the bridge with Ctrl+C.')
 })
 
 process.on('SIGINT', () => { dropClient(1001, 'Bridge stopping'); codexSocket.destroy(); server.close() })
