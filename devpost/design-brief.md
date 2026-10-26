@@ -21,7 +21,7 @@ The user asks Codex to handle a coding task, then continues with their day. RunC
 - Environment: the current experience is focused on the RunCodex interface in the user's Codex work area, with no decorative room set dressing competing with the conversation.
 - RunCodex launcher: a compact world-space control placed once in the user's Codex work area at a comfortable, reachable glance height. It remains fixed in the room as the user turns or moves.
 - Status and conversation panel: opens at the launcher's world-locked placement and remains there while open. It uses a compact, high-contrast surface, readable text, a message history, task status, and approval controls. It does not follow the user's head or rotate to face the camera continuously.
-- Move / Recenter: an explicit control repositions the launcher and panel at a comfortable offset in front of the user's current view. The new world transform remains fixed until moved again.
+- Drag to reposition: a highlighted grab bar sits beneath the open panel. The user pinches and drags it to move the panel and launcher together, then releases to leave them fixed at the new world position.
 - Attention cue: shown with the launcher/panel state when a real approval is pending; the panel does not replace or invent a Codex approval.
 
 ## Hands and input
@@ -61,7 +61,7 @@ Check these in Lens Studio Preview where the required bridge and SPECS input sim
 - Build for SPECS so it runs and can be demonstrated in Lens Studio's preview. No SPECS device is available.
 - Use Spectacles Interaction Kit (SIK) and UI Kit for all interactions, so they work with the mouse in Interactive Preview and with LEAF.
 - Build any stand-in exactly as described above, and keep it obvious in the scene.
-- Use real-world scale in centimeters. Place the launcher once in the user's Codex work area, then keep the launcher and panel world-locked until the user moves/recenters them.
+- Use real-world scale in centimeters. Place the launcher and panel once in the near-field arm-reach zone, slightly below the display boresight, then keep them world-locked until the user drags the grab bar. Keep targets large enough for comfortable direct hand interaction and use the SIK InteractionPlane for the panel's near-field targeting.
 - The display is additive: black renders as transparent. Don't rely on black or very dark content to be seen; keep text light and readable from where the user stands.
 - Get the basic flow working first, then add detail.
 - Write LEAF scenarios for each done criterion, run them in preview, and report which pass. Say which criteria have no test.
@@ -71,7 +71,7 @@ Check these in Lens Studio Preview where the required bridge and SPECS input sim
 This part is for you, after CLAD finishes.
 
 1. **Does it work?** Ask your agent which LEAF tests passed and which done criteria have no test.
-2. **Move and look around.** Open the preview in Interactive Preview. Use WASD to move, Q and E to go down and up, and right-drag (or hold Shift) to look around. Clicking acts as a pinch. Confirm the launcher and open panel stay fixed at their selected world placement as the view changes; use Move / Recenter to place them at the current view when desired.
+2. **Move and look around.** Open the preview in Interactive Preview. Use WASD to move, Q and E to go down and up, and right-drag (or hold Shift) to look around. Clicking acts as a pinch. Confirm the launcher and open panel stay fixed at their selected world placement as the view changes; pinch-drag the handle beneath the panel to move both together.
 3. **Ask the three questions.**
    - Does the chosen work-area placement make the Codex conversation easy to find and read without becoming a face-locked website?
    - Does voice dictation plus glanceable status/approval keep the user from returning to the laptop for each step?
@@ -79,7 +79,7 @@ This part is for you, after CLAD finishes.
    - Would it be just as good on a phone? If so, what value do voice input and spatial glanceability add on glasses?
 4. **Check comfort.**
    - The compact launcher is easy to relocate; the panel stays at a comfortable work-area position without blocking too much of the real scene.
-   - Every control is within easy pinch reach at the current placement; Move / Recenter makes relocation explicit.
+   - Every control is within easy pinch reach at the current placement; the highlighted bottom handle makes relocation discoverable.
    - Text reads easily at the intended viewing distance, and the panel stays compact.
    - Approval and connection feedback appear when needed; the panel can be closed when the user wants an unobstructed view.
 5. **Label what you know.** Write "logic proven" next to anything the tests and preview show working, and "feel unproven" next to anything only real glasses could tell you (comfort over time, real hand tracking, real recognition).

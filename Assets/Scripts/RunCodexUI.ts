@@ -7,6 +7,13 @@ import {ElementContent} from "SpectaclesUIKit.lspkg/Scripts/Components/Content/E
 import {HandInputData} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/HandInputData"
 import {BaseHand} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/BaseHand"
 import WorldCameraFinderProvider from "SpectaclesInteractionKit.lspkg/Providers/CameraProvider/WorldCameraFinderProvider"
+import {InteractionPlane} from "SpectaclesInteractionKit.lspkg/Components/Interaction/InteractionPlane/InteractionPlane"
+import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable"
+import {InteractableManipulation} from "SpectaclesInteractionKit.lspkg/Components/Interaction/InteractableManipulation/InteractableManipulation"
+
+const MIC_ICON = requireAsset("../Icons/mic.png") as Texture
+const SEND_ICON = requireAsset("../Icons/send.png") as Texture
+const REFRESH_ICON = requireAsset("../Icons/refresh.png") as Texture
 
 type TaskState = "Working" | "Needs approval" | "Done" | "Rejected"
 
@@ -14,6 +21,7 @@ const SAMPLE_LABEL = "SAMPLE DATA — NOT CONNECTED TO CODEX"
 const TASK_NAME = "Refactor coffee ordering tests"
 const SUMMARY = "Updated 8 tests, removed 2 flaky waits, and all checks passed."
 const SUMMARY_VIEWPORT_HEIGHT = 15.5
+const PANEL_MAX_CONTENT_HEIGHT = 38
 const SUMMARY_VISIBLE_LINES = 11
 const SUMMARY_LINE_WIDTH = 52
 const USER_MESSAGE_MIN_HEIGHT = 2.8
@@ -35,8 +43,10 @@ const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
 const LIVE_CONNECTING_LABEL = "CONNECTING TO CODEX BRIDGE"
 const LIVE_OFFLINE_LABEL = "CODEX BRIDGE OFFLINE"
-const LAUNCHER_PLACEMENT_OFFSET = new vec3(0, -1, -105)
-const PANEL_PLACEMENT_OFFSET = new vec3(0, -3, -105)
+// Keep the interface in the near-field reach zone and slightly below the
+// display boresight. A half-scale at 55 cm preserves its former visual size.
+const NEAR_FIELD_UI_SCALE = new vec3(0.5, 0.5, 0.5)
+const PANEL_PLACEMENT_OFFSET = new vec3(3, -9, -55)
 
 @component
 export class RunCodexUI extends BaseScriptComponent {
@@ -50,13 +60,18 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private panel!: SceneObject
   private launcher!: SceneObject
+  private placementRoot!: SceneObject
+  private dragHandle!: SceneObject
+  private dragHandleSurface!: RoundedRectangle
+  private dragHandleLabel!: ElementContent
+  private dragHandleInteractable!: Interactable
+  private dragHandleManipulation!: InteractableManipulation
   private cue!: SceneObject
   private state: TaskState = "Working"
   private contentFlex!: FlexLayout
   private feedbackText!: SceneObject
   private closeButton!: SceneObject
   private restartButton!: SceneObject
-  private movePanelButton!: SceneObject
   private approvalButtonRow!: SceneObject
   private actionsRow!: SceneObject
   private flexRows: Array<{item: FlexItem, sceneObject: SceneObject}> = []
@@ -154,6 +169,7 @@ export class RunCodexUI extends BaseScriptComponent {
   private launcherSampleLabel!: ElementContent
 
   onAwake(): void {
+    this.placementRoot = global.scene.createSceneObject("RunCodexPlacementRoot")
     this.createRunButton()
     this.createPanel()
     this.contentFlex.onLayoutComplete.add(() => this.positionSummaryViewportBackdrop())
@@ -171,6 +187,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.createEvent("TouchEndEvent").bind((event: TouchEndEvent) => this.onPreviewTouchEnd(event))
     this.createEvent("OnStartEvent").bind(() => {
       this.onStart()
+      this.bindDragHandle()
       const left = this.handProvider.getHand("left")
       const right = this.handProvider.getHand("right")
       left.onPinchDown.add(() => this.beginHandSwipe("left", left))
@@ -486,7 +503,14 @@ export class RunCodexUI extends BaseScriptComponent {
   private setConnectionLabel(label: string): void {
     const panelLabel = this.findText("SampleDataLabel")
     panelLabel.text = label
-    this.launcherSampleLabel.text = label
+    const compactLauncherLabel = label === SAMPLE_LABEL
+      ? "SAMPLE DATA\nNOT CONNECTED TO CODEX"
+      : label === LIVE_CONNECTED_LABEL ? "LIVE · CONNECTED" : label
+    this.launcherSampleLabel.text = compactLauncherLabel
+    const isSample = label === SAMPLE_LABEL
+    this.launcherSampleLabel.textSize = isSample ? 23 : 22
+    this.launcherSampleLabel.sizeOverride = new vec2(isSample ? 22 : 14, isSample ? 3.2 : 2.2)
+    this.launcherSampleLabel.getSceneObject().getTransform().setLocalPosition(new vec3(0, isSample ? -4.5 : -3.6, 0.3))
   }
 
   private answerLiveApproval(decision: "accept" | "decline"): void {
@@ -502,9 +526,31 @@ export class RunCodexUI extends BaseScriptComponent {
   private createRunButton(): void {
     const root = global.scene.createSceneObject("RunCodexButton")
     this.launcher = root
+    root.setParent(this.placementRoot)
+    root.getTransform().setLocalPosition(new vec3(0, 7, 0))
     root.createComponent("Component.Canvas")
+    const launcherSurfaceObject = global.scene.createSceneObject("RunCodexLauncherSurface")
+    launcherSurfaceObject.setParent(root)
+    launcherSurfaceObject.getTransform().setLocalPosition(new vec3(0, 0, -0.12))
+    const launcherSurface = launcherSurfaceObject.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    launcherSurface.initialize()
+    launcherSurface.size = new vec2(14, 5.4)
+    launcherSurface.setBackgroundGradient({
+      enabled: true,
+      type: "Linear",
+      start: new vec2(-1, 1),
+      end: new vec2(1, -1),
+      stop0: {enabled: true, color: new vec4(0.004, 0.02, 0.045, 1), percent: 0},
+      stop1: {enabled: true, color: new vec4(0.012, 0.055, 0.095, 1), percent: 1}
+    })
+    launcherSurface.border = true
+    launcherSurface.borderType = "Color"
+    launcherSurface.borderColor = new vec4(0.08, 0.34, 0.5, 1)
+    launcherSurface.borderSize = 0.035
+    launcherSurface.opacity = 1
+    launcherSurface.renderMeshVisual.enabled = true
     const button = root.createComponent(Button.getTypeName()) as Button
-    button.setTheme("SnapOS3", "Prism")
+    button.setTheme("SnapOS3", "Secondary")
     button.size = new vec3(14, 5.4, 0.6)
     const label = root.createComponent(ElementContent.getTypeName()) as ElementContent
     label.text = "RunCodex"
@@ -528,9 +574,10 @@ export class RunCodexUI extends BaseScriptComponent {
     sampleTag.setParent(root)
     sampleTag.getTransform().setLocalPosition(new vec3(0, -5.1, 0.3))
     this.launcherSampleLabel = sampleTag.createComponent(ElementContent.getTypeName()) as ElementContent
-    this.launcherSampleLabel.text = SAMPLE_LABEL
-    this.launcherSampleLabel.textSize = 34
-    this.launcherSampleLabel.sizeOverride = new vec2(38, 3.3)
+    this.launcherSampleLabel.text = "SAMPLE DATA\nNOT CONNECTED TO CODEX"
+    this.launcherSampleLabel.textSize = 23
+    this.launcherSampleLabel.sizeOverride = new vec2(22, 3.2)
+    sampleTag.getTransform().setLocalPosition(new vec3(0, -4.5, 0.3))
     this.launcherSampleLabel.contentAlignment = "center"
 
     const cue = global.scene.createSceneObject("NeedsApprovalCue")
@@ -548,11 +595,15 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private createPanel(): void {
     this.panel = global.scene.createSceneObject("RunCodexStatusPanel")
+    this.panel.setParent(this.placementRoot)
     this.panel.createComponent("Component.Canvas")
+    const interactionPlane = this.panel.createComponent(InteractionPlane.getTypeName()) as InteractionPlane
+    interactionPlane.planeSize = new vec2(28, 40)
+    interactionPlane.targetingVisual = 0
     this.opaqueBackdrop = this.findObject("RunCodexOpaqueBackdrop")
     this.opaqueBackdrop.setParent(this.panel)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
-    this.opaqueBackdrop.getTransform().setLocalScale(new vec3(32, 54, 1))
+    this.opaqueBackdrop.getTransform().setLocalScale(new vec3(28, 40, 1))
     this.opaqueBackdrop.enabled = false
     const opaqueVisual = this.opaqueBackdrop.getComponent("Component.RenderMeshVisual") as RenderMeshVisual
     // This backdrop material can have no main pass in the recovered scene.
@@ -565,7 +616,7 @@ export class RunCodexUI extends BaseScriptComponent {
     backdrop.getTransform().setLocalPosition(new vec3(0, 0, 0))
     this.surface = backdrop.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
     this.surface.initialize()
-    this.surface.size = new vec2(32, 54)
+    this.surface.size = new vec2(28, 40)
     this.surface.setBackgroundGradient({
       enabled: true,
       type: "Linear",
@@ -576,26 +627,28 @@ export class RunCodexUI extends BaseScriptComponent {
     })
     this.surface.border = true
     this.surface.borderType = "Color"
-    this.surface.borderColor = new vec4(0.12, 0.66, 0.92, 1)
-    this.surface.borderSize = 0.09
+    this.surface.borderColor = new vec4(0.08, 0.34, 0.5, 1)
+    this.surface.borderSize = 0.035
     this.surface.opacity = 1
     this.surface.renderMeshVisual.enabled = true
+
+    this.createDragHandle()
 
     const content = global.scene.createSceneObject("RunCodexContent")
     content.setParent(this.panel)
     content.getTransform().setLocalPosition(new vec3(0, 0, 0.6))
     const flex = content.createComponent(FlexLayout.getTypeName()) as FlexLayout
     flex.autoDiscoverItemsOnStart = false
-    flex.width = 29
-    flex.height = 52
+    flex.width = 26
+    flex.height = PANEL_MAX_CONTENT_HEIGHT
     flex.direction = FlexDirection.Column
     flex.justifyContent = FlexJustify.Start
     flex.alignItems = FlexAlign.Stretch
     flex.rowGap = 0.12
     flex.paddingTop = 0.7
     flex.paddingBottom = 0.7
-    flex.paddingLeft = 1.5
-    flex.paddingRight = 1.5
+    flex.paddingLeft = 1
+    flex.paddingRight = 1
     this.contentFlex = flex
 
     this.summaryViewportBackdrop = global.scene.createSceneObject("SummaryViewportBackdrop")
@@ -603,7 +656,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryViewportBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.45))
     this.summaryViewportSurface = this.summaryViewportBackdrop.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
     this.summaryViewportSurface.initialize()
-    this.summaryViewportSurface.size = new vec2(27, this.summaryViewportHeight)
+    this.summaryViewportSurface.size = new vec2(25.6, this.summaryViewportHeight)
     this.summaryViewportSurface.setBackgroundGradient({
       enabled: true,
       type: "Linear",
@@ -618,24 +671,24 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryViewportSurface.borderSize = 0.045
     this.summaryViewportSurface.opacity = 1
 
-    const panelHeader = this.createButtonRow(flex, "PanelHeaderRow", 27, 5)
-    this.addText(panelHeader, "SampleDataLabel", SAMPLE_LABEL, 22, 4.5, 39)
-    this.refreshStatusButton = this.addButton(panelHeader, "RefreshCodexStatusButton", "↻", 4.4, () => this.advance(), 4.4, 68)
-    this.addText(flex, "TaskName", TASK_NAME, 27, 2.1, 62)
-    this.statusText = this.addText(flex, "TaskStatus", "Working", 27, 2, 61)
+    const panelHeader = this.createButtonRow(flex, "PanelHeaderRow", 26, 4.8)
+    this.addText(panelHeader, "SampleDataLabel", SAMPLE_LABEL, 16, 3.6, 28)
+    this.refreshStatusButton = this.addButton(panelHeader, "RefreshCodexStatusButton", "", 4.6, () => this.advance(), 4.6)
+    this.addText(flex, "TaskName", TASK_NAME, 26, 1.8, 44)
+    this.statusText = this.addText(flex, "TaskStatus", "Working", 26, 1.45, 36)
     this.statusTextObject = this.statusText.getSceneObject()
     const userMessageRow = global.scene.createSceneObject("UserMessageRow")
     userMessageRow.setParent(flex.getSceneObject())
     userMessageRow.enabled = false
     const userMessageRowLayout = userMessageRow.createComponent(FlexLayout.getTypeName()) as FlexLayout
     userMessageRowLayout.autoDiscoverItemsOnStart = false
-    userMessageRowLayout.width = 27
+    userMessageRowLayout.width = 26
     userMessageRowLayout.height = USER_MESSAGE_MIN_HEIGHT + 0.3
     userMessageRowLayout.direction = FlexDirection.Row
     userMessageRowLayout.justifyContent = FlexJustify.End
     userMessageRowLayout.alignItems = FlexAlign.Center
     const userMessageRowItem = userMessageRow.createComponent(FlexItem.getTypeName()) as FlexItem
-    userMessageRowItem.overrideWidth = 27
+    userMessageRowItem.overrideWidth = 26
     userMessageRowItem.overrideHeight = USER_MESSAGE_MIN_HEIGHT + 0.3
     this.flexRows.push({item: userMessageRowItem, sceneObject: userMessageRow})
     flex.addItems([userMessageRowItem])
@@ -700,7 +753,7 @@ export class RunCodexUI extends BaseScriptComponent {
     approvalTopSpacerObject.setParent(flex.getSceneObject())
     approvalTopSpacerObject.enabled = false
     const approvalTopSpacerItem = approvalTopSpacerObject.createComponent(FlexItem.getTypeName()) as FlexItem
-    approvalTopSpacerItem.overrideWidth = 27
+    approvalTopSpacerItem.overrideWidth = 26
     approvalTopSpacerItem.overrideHeight = APPROVAL_ROW_GAP
     this.approvalTopSpacer = {item: approvalTopSpacerItem, sceneObject: approvalTopSpacerObject}
     this.flexRows.push(this.approvalTopSpacer)
@@ -709,7 +762,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approvalCard.setParent(flex.getSceneObject())
     this.approvalCard.enabled = false
     this.approvalCardItem = this.approvalCard.createComponent(FlexItem.getTypeName()) as FlexItem
-    this.approvalCardItem.overrideWidth = 27
+    this.approvalCardItem.overrideWidth = 26
     this.approvalCardItem.overrideHeight = 12
     this.flexRows.push({item: this.approvalCardItem, sceneObject: this.approvalCard})
     flex.addItems([this.approvalCardItem])
@@ -719,7 +772,7 @@ export class RunCodexUI extends BaseScriptComponent {
     approvalCardSurfaceObject.getTransform().setLocalPosition(new vec3(0, 0, 0.08))
     this.approvalCardSurface = approvalCardSurfaceObject.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
     this.approvalCardSurface.initialize()
-    this.approvalCardSurface.size = new vec2(27, 12)
+    this.approvalCardSurface.size = new vec2(26, 12)
     this.approvalCardSurface.setBackgroundGradient({
       enabled: true,
       type: "Linear",
@@ -739,7 +792,7 @@ export class RunCodexUI extends BaseScriptComponent {
     approvalCardContentObject.getTransform().setLocalPosition(new vec3(0, 0, 0.62))
     this.approvalCardFlex = approvalCardContentObject.createComponent(FlexLayout.getTypeName()) as FlexLayout
     this.approvalCardFlex.autoDiscoverItemsOnStart = false
-    this.approvalCardFlex.width = 25
+    this.approvalCardFlex.width = 24
     this.approvalCardFlex.height = 12
     this.approvalCardFlex.direction = FlexDirection.Column
     this.approvalCardFlex.justifyContent = FlexJustify.Start
@@ -747,8 +800,8 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approvalCardFlex.rowGap = APPROVAL_CARD_GAP
     this.approvalCardFlex.paddingTop = APPROVAL_CARD_PADDING
     this.approvalCardFlex.paddingBottom = APPROVAL_CARD_PADDING
-    this.approvalCardFlex.paddingLeft = 1
-    this.approvalCardFlex.paddingRight = 1
+    this.approvalCardFlex.paddingLeft = 0.9
+    this.approvalCardFlex.paddingRight = 0.9
 
     this.approvalCardTitle = this.addText(this.approvalCardFlex, "ApprovalCardTitle", "LIVE CODEX APPROVAL", 23, APPROVAL_TITLE_HEIGHT, 38)
     this.approvalCardTitle.weight = 650
@@ -756,7 +809,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approvalCardTitle.layoutRect = Rect.create(-11.35, 11.35, -0.65, 0.65)
     this.approvalCardRows.push({item: this.approvalCardTitle.getSceneObject().getComponent(FlexItem.getTypeName()) as FlexItem, sceneObject: this.approvalCardTitle.getSceneObject()})
 
-    this.approvalTextComponent = this.addText(this.approvalCardFlex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 23, 3, 44)
+    this.approvalTextComponent = this.addText(this.approvalCardFlex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 22, 3, 44)
     this.approvalText = this.approvalTextComponent.getSceneObject()
     this.approvalTextItem = this.approvalText.getComponent(FlexItem.getTypeName()) as FlexItem
     this.approvalTextComponent.weight = 500
@@ -809,17 +862,17 @@ export class RunCodexUI extends BaseScriptComponent {
     approvalHintText.layoutRect = Rect.create(-11.2, 11.2, -0.55, 0.55)
     this.approvalCardRows.push({item: this.approvalHint.getComponent(FlexItem.getTypeName()) as FlexItem, sceneObject: this.approvalHint})
 
-    this.feedbackText = this.addText(flex, "ApprovalFeedback", "", 27, 2.7, 42).getSceneObject()
-    const summaryMeta = this.createButtonRow(flex, "ConversationProgressRow", 27, 1.4)
+    this.feedbackText = this.addText(flex, "ApprovalFeedback", "", 26, 2.3, 38).getSceneObject()
+    const summaryMeta = this.createButtonRow(flex, "ConversationProgressRow", 26, 1.3)
     summaryMeta.justifyContent = FlexJustify.End
     this.summaryMetaRow = summaryMeta.getSceneObject()
-    this.summaryTextComponent = this.addText(flex, "CompletionSummary", "", 27, SUMMARY_VIEWPORT_HEIGHT, 44)
+    this.summaryTextComponent = this.addText(flex, "CompletionSummary", "", 26, SUMMARY_VIEWPORT_HEIGHT, 44)
     this.summaryText = this.summaryTextComponent.getSceneObject()
     this.summaryTextComponent.weight = 500
     this.summaryTextComponent.lineSpacing = 1.08
     this.summaryTextComponent.layoutRect = Rect.create(
-      -13.5 + 1.4,
-      13.5 - 1.4,
+      -12.8 + 1.1,
+      12.8 - 1.1,
       -SUMMARY_VIEWPORT_HEIGHT * 0.5 + 1.1,
       SUMMARY_VIEWPORT_HEIGHT * 0.5 - 1.1
     )
@@ -835,40 +888,95 @@ export class RunCodexUI extends BaseScriptComponent {
     spacerObject.setParent(flex.getSceneObject())
     spacerObject.enabled = false
     const spacerItem = spacerObject.createComponent(FlexItem.getTypeName()) as FlexItem
-    spacerItem.overrideWidth = 29
+    spacerItem.overrideWidth = 26
     spacerItem.overrideHeight = 0
     this.actionGroupSpacer = {item: spacerItem, sceneObject: spacerObject}
     this.flexRows.push(this.actionGroupSpacer)
-    const liveCompose = this.createButtonRow(flex, "LiveConversationActionsRow", 27, 5)
+    const liveCompose = this.createButtonRow(flex, "LiveConversationActionsRow", 26, 4.5)
     this.liveComposeRow = liveCompose.getSceneObject()
-    this.composeButton = this.addButton(liveCompose, "ComposeMessageButton", "Speak", 12.8, () => this.openComposer(), 5, 32)
-    this.sendButton = this.addButton(liveCompose, "SendMessageButton", "Send", 12.8, () => this.sendLiveMessage(), 5, 34)
-    this.advanceButton = this.addButton(flex, "AdvanceSampleButton", "Advance sample task", 27, () => this.advance(), 5)
+    this.composeButton = this.addButton(liveCompose, "ComposeMessageButton", "Speak", 12.2, () => this.openComposer(), 4.5, 38)
+    this.sendButton = this.addButton(liveCompose, "SendMessageButton", "Send", 12.2, () => this.sendLiveMessage(), 4.5, 40)
+    this.advanceButton = this.addButton(flex, "AdvanceSampleButton", "Advance sample task", 26, () => this.advance(), 4.5)
     const refreshSpacerObject = global.scene.createSceneObject("RefreshToActionsSpacer")
     refreshSpacerObject.setParent(flex.getSceneObject())
     refreshSpacerObject.enabled = false
     const refreshSpacerItem = refreshSpacerObject.createComponent(FlexItem.getTypeName()) as FlexItem
-    refreshSpacerItem.overrideWidth = 29
+    refreshSpacerItem.overrideWidth = 26
     refreshSpacerItem.overrideHeight = 0.65
     this.refreshToActionsSpacer = {item: refreshSpacerItem, sceneObject: refreshSpacerObject}
     this.flexRows.push(this.refreshToActionsSpacer)
-    const placementRow = this.createButtonRow(flex, "PanelPlacementActionsRow", 27, 4.8)
-    this.movePanelButton = this.addButton(
-      placementRow,
-      "MovePanelButton",
-      "Move / Recenter",
-      25.8,
-      () => this.placeAtCurrentView(),
-      4.2,
-      30
-    )
-    const actions = this.createButtonRow(flex, "PanelActionsRow", 27, 5)
+    const actions = this.createButtonRow(flex, "PanelActionsRow", 26, 4.5)
     this.actionsRow = actions.getSceneObject()
-    this.closeButton = this.addButton(actions, "ClosePanelButton", "Close panel", 12.8, () => this.closePanel(), 5)
-    this.restartButton = this.addButton(actions, "RestartSampleButton", "Restart sample", 12.8, () => {
+    this.closeButton = this.addButton(actions, "ClosePanelButton", "Close panel", 12.2, () => this.closePanel(), 4.5)
+    this.restartButton = this.addButton(actions, "RestartSampleButton", "Restart sample", 12.2, () => {
       if (this.liveMode) this.closeRunCodex()
       else this.restart()
-    }, 5)
+    }, 4.5)
+  }
+
+  private createDragHandle(): void {
+    this.dragHandle = global.scene.createSceneObject("RunCodexDragHandle")
+    this.dragHandle.setParent(this.panel)
+    this.dragHandle.getTransform().setLocalPosition(new vec3(0, -21.5, 0.35))
+
+    this.dragHandleSurface = this.dragHandle.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    this.dragHandleSurface.initialize()
+    this.dragHandleSurface.size = new vec2(18, 2.8)
+    this.dragHandleSurface.setBackgroundGradient({
+      enabled: true,
+      type: "Linear",
+      start: new vec2(-1, 1),
+      end: new vec2(1, -1),
+      stop0: {enabled: true, color: new vec4(0.012, 0.075, 0.12, 1), percent: 0},
+      stop1: {enabled: true, color: new vec4(0.022, 0.14, 0.19, 1), percent: 1}
+    })
+    this.dragHandleSurface.border = true
+    this.dragHandleSurface.borderType = "Color"
+    this.dragHandleSurface.borderColor = new vec4(0.12, 0.48, 0.64, 1)
+    this.dragHandleSurface.borderSize = 0.055
+    this.dragHandleSurface.opacity = 1
+
+    this.dragHandleLabel = this.dragHandle.createComponent(ElementContent.getTypeName()) as ElementContent
+    this.dragHandleLabel.text = "DRAG TO MOVE"
+    this.dragHandleLabel.textSize = 27
+    this.dragHandleLabel.sizeOverride = new vec2(17, 2.6)
+    this.dragHandleLabel.contentAlignment = "center"
+
+    const collider = this.dragHandle.createComponent("Physics.ColliderComponent") as ColliderComponent
+    const colliderShape = Shape.createBoxShape()
+    colliderShape.size = new vec3(18, 4.4, 1.2)
+    collider.shape = colliderShape
+    collider.debugDrawEnabled = false
+
+    this.dragHandleInteractable = this.dragHandle.createComponent(Interactable.getTypeName()) as Interactable
+    this.dragHandleInteractable.targetingMode = 3
+    this.dragHandleManipulation = this.dragHandle.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation
+    this.dragHandleManipulation.setManipulateRoot(this.placementRoot.getTransform())
+    this.dragHandleManipulation.setCanRotate(false)
+    this.dragHandleManipulation.setCanScale(false)
+    this.dragHandleManipulation.enableStretchZ = false
+  }
+
+  private bindDragHandle(): void {
+    const setHighlight = (active: boolean) => {
+      this.dragHandleSurface.setBackgroundGradient({
+        enabled: true,
+        type: "Linear",
+        start: new vec2(-1, 1),
+        end: new vec2(1, -1),
+        stop0: {enabled: true, color: active ? new vec4(0.018, 0.12, 0.18, 1) : new vec4(0.012, 0.075, 0.12, 1), percent: 0},
+        stop1: {enabled: true, color: active ? new vec4(0.035, 0.23, 0.3, 1) : new vec4(0.022, 0.14, 0.19, 1), percent: 1}
+      })
+      this.dragHandleSurface.borderColor = active
+        ? new vec4(0.22, 0.86, 1, 1)
+        : new vec4(0.12, 0.48, 0.64, 1)
+      this.dragHandleSurface.opacity = 1
+      this.dragHandleLabel.text = active ? "MOVE PANEL" : "DRAG TO MOVE"
+    }
+    this.dragHandleInteractable.onHoverEnter.add(() => setHighlight(true))
+    this.dragHandleInteractable.onHoverExit.add(() => setHighlight(false))
+    this.dragHandleManipulation.onManipulationStart.add(() => setHighlight(true))
+    this.dragHandleManipulation.onManipulationEnd.add(() => setHighlight(false))
   }
 
   private createButtonRow(parent: FlexLayout, name: string, width: number, height: number): FlexLayout {
@@ -911,10 +1019,35 @@ export class RunCodexUI extends BaseScriptComponent {
   private addButton(layout: FlexLayout, name: string, labelText: string, width: number, action: () => void, height: number, textSize: number = 40): SceneObject {
     const so = global.scene.createSceneObject(name)
     so.setParent(layout.getSceneObject())
-    const button = so.createComponent(Button.getTypeName()) as Button
+    const isSpeakButton = name === "ComposeMessageButton"
+    const isSendButton = name === "SendMessageButton"
+    const isRefreshButton = name === "RefreshCodexStatusButton"
     const primary = name === "ApproveButton" || name === "AdvanceSampleButton"
     const quietControl = name === "ClosePanelButton"
-    button.setTheme("SnapOS3", primary ? "Prism" : quietControl ? "Ghost" : "Secondary")
+    const style = isSendButton ? "Prism" : primary ? "Prism" : quietControl ? "Ghost" : "Secondary"
+    if (style !== "Prism") {
+      const fillObject = global.scene.createSceneObject(name + "GlassSurface")
+      fillObject.setParent(so)
+      fillObject.getTransform().setLocalPosition(new vec3(0, 0, -0.12))
+      const fill = fillObject.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+      fill.initialize()
+      fill.size = new vec2(width, height)
+      fill.setBackgroundGradient({
+        enabled: true,
+        type: "Linear",
+        start: new vec2(-1, 1),
+        end: new vec2(1, -1),
+        stop0: {enabled: true, color: isSpeakButton ? new vec4(0.012, 0.075, 0.12, 0.94) : new vec4(0.02, 0.085, 0.13, 0.86), percent: 0},
+        stop1: {enabled: true, color: isSpeakButton ? new vec4(0.022, 0.14, 0.19, 0.94) : new vec4(0.055, 0.16, 0.22, 0.86), percent: 1}
+      })
+      fill.border = true
+      fill.borderType = "Color"
+      fill.borderColor = new vec4(0.16, 0.48, 0.62, isSpeakButton ? 0.9 : 0.72)
+      fill.borderSize = 0.045
+      fill.opacity = 0.9
+    }
+    const button = so.createComponent(Button.getTypeName()) as Button
+    button.setTheme("SnapOS3", style)
     button.size = new vec3(width, height, 1)
     button.onTriggerUp.add(action)
     const label = so.createComponent(ElementContent.getTypeName()) as ElementContent
@@ -922,6 +1055,17 @@ export class RunCodexUI extends BaseScriptComponent {
     label.textSize = textSize
     label.sizeOverride = new vec2(width - 1, height - 1)
     label.contentAlignment = "center"
+    if (isSpeakButton || isSendButton || isRefreshButton) {
+      label.leadingIcon = isSpeakButton ? MIC_ICON : isSendButton ? SEND_ICON : REFRESH_ICON
+      label.leadingIconSize = isRefreshButton ? 3.1 : 2.8
+      if (!isRefreshButton) {
+        label.iconLayout = "left"
+        label.spacing = 0.3
+        label.contentAlignment = "left"
+        label.paddingLeft = 2
+        label.paddingRight = 0.35
+      }
+    }
     const item = so.createComponent(FlexItem.getTypeName()) as FlexItem
     item.overrideWidth = width
     item.overrideHeight = height
@@ -1007,8 +1151,14 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private refreshState(): void {
     const liveSessionUsable = this.liveMode && this.liveConnected && this.codexReady && this.liveThreadId.length > 0
+    const connectionLabel = this.findText("SampleDataLabel")
+    const connectionLabelItem = connectionLabel.getSceneObject().getComponent(FlexItem.getTypeName()) as FlexItem
+    const labelWidth = this.liveMode ? 16.1 : 20.5
+    connectionLabelItem.overrideWidth = labelWidth
+    connectionLabel.size = this.liveMode ? 25 : 28
+    connectionLabel.layoutRect = Rect.create(-labelWidth * 0.5 + 2, labelWidth * 0.5 - 2, -1.65, 1.65)
     this.statusText.text = this.state
-    this.statusText.size = this.state === "Needs approval" ? 42 : 61
+    this.statusText.size = this.state === "Needs approval" ? 32 : 38
     if (this.state !== "Working") this.resetWorkingBreath()
     const approvalVisible = this.state === "Needs approval" && (!this.liveMode || (liveSessionUsable && this.liveApprovalId !== null))
     this.cue.enabled = approvalVisible && !this.panel.enabled
@@ -1075,17 +1225,17 @@ export class RunCodexUI extends BaseScriptComponent {
     const camera = this.cameraProvider.getComponent()
     if (!camera) return
 
-    // Place once in front of the current view. These world transforms stay
-    // fixed until the user explicitly chooses Move / Recenter.
+    // Place the shared launcher/panel anchor once in front of the current
+    // view. SIK manipulation later moves this same root when the user drags
+    // the panel's bottom handle, keeping both entry points together.
     const cameraTransform = camera.getSceneObject().getTransform()
     const cameraWorld = cameraTransform.getWorldTransform()
     const cameraRotation = cameraTransform.getWorldRotation()
-    const launcherTransform = this.launcher.getTransform()
-    launcherTransform.setWorldPosition(cameraWorld.multiplyPoint(LAUNCHER_PLACEMENT_OFFSET))
-    launcherTransform.setWorldRotation(cameraRotation)
-    const panelTransform = this.panel.getTransform()
-    panelTransform.setWorldPosition(cameraWorld.multiplyPoint(PANEL_PLACEMENT_OFFSET))
-    panelTransform.setWorldRotation(cameraRotation)
+    const placementTransform = this.placementRoot.getTransform()
+    placementTransform.setWorldPosition(cameraWorld.multiplyPoint(PANEL_PLACEMENT_OFFSET))
+    placementTransform.setWorldRotation(cameraRotation)
+    placementTransform.setWorldScale(NEAR_FIELD_UI_SCALE)
+    this.launcher.getTransform().setLocalPosition(new vec3(0, 7, 0))
   }
 
   private resetWorkingBreath(): void {
@@ -1101,8 +1251,8 @@ export class RunCodexUI extends BaseScriptComponent {
   }
 
   private resizeSurface(): void {
-    const width = 32
-    const height = 54
+    const width = 28
+    const height = Math.min(PANEL_MAX_CONTENT_HEIGHT + 2, Math.max(18, this.contentFlex.height + 2))
     this.surface.size = new vec2(width, height)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
     this.opaqueBackdrop.getTransform().setLocalScale(new vec3(width, height, 1))
@@ -1409,7 +1559,7 @@ export class RunCodexUI extends BaseScriptComponent {
 
     // Account for the optional conversation gap before measuring the space
     // available to the card in the parent panel.
-    const showGap = this.approvalCard.enabled && this.lastUserMessageRow.enabled
+    const showGap = this.approvalCard.enabled
     if (this.approvalTopSpacer) {
       this.approvalTopSpacer.sceneObject.enabled = showGap
       this.approvalTopSpacer.item.overrideHeight = showGap ? APPROVAL_ROW_GAP : 0
@@ -1422,7 +1572,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const otherRows = this.flexRows.filter(row => row.sceneObject.enabled && row.item !== this.approvalCardItem)
     const otherHeight = otherRows.reduce((sum, row) => sum + row.item.overrideHeight, 0)
     const cardGapCount = this.approvalCard.enabled ? otherRows.length : 0
-    const availableCardHeight = Math.max(8, this.contentFlex.height - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - cardGapCount * this.contentFlex.rowGap)
+    const availableCardHeight = Math.max(8, PANEL_MAX_CONTENT_HEIGHT - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - cardGapCount * this.contentFlex.rowGap)
     const shortFixedHeight = APPROVAL_CARD_PADDING * 2 + APPROVAL_TITLE_HEIGHT + APPROVAL_BUTTON_HEIGHT + APPROVAL_HINT_HEIGHT + APPROVAL_CARD_GAP * 3
     const scrollFixedHeight = shortFixedHeight + 1 + APPROVAL_CARD_GAP
     const scrollCapacity = Math.max(1, Math.floor((availableCardHeight - scrollFixedHeight) / lineHeight))
@@ -1457,7 +1607,7 @@ export class RunCodexUI extends BaseScriptComponent {
 
     this.approvalCardFlex.height = cardHeight
     this.approvalCardItem.overrideHeight = cardHeight
-    this.approvalCardSurface.size = new vec2(27, cardHeight)
+    this.approvalCardSurface.size = new vec2(26, cardHeight)
     if (this.approvalProgressRegistered !== hasOverflow) {
       this.approvalCardFlex.clearItems()
       this.approvalCardFlex.addItems(this.approvalCardRows.filter(row => row.sceneObject.enabled).map(row => row.item))
@@ -1733,20 +1883,25 @@ export class RunCodexUI extends BaseScriptComponent {
         .filter(row => row.item !== summaryItem)
         .reduce((sum, row) => sum + row.item.overrideHeight, 0)
       const gaps = Math.max(0, activeRows.length - 1) * this.contentFlex.rowGap
-      const available = this.contentFlex.height - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - gaps
+      const available = PANEL_MAX_CONTENT_HEIGHT - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - gaps
       this.summaryViewportHeight = Math.max(4.5, Math.min(SUMMARY_VIEWPORT_HEIGHT, available))
       summaryItem.overrideHeight = this.summaryViewportHeight
       this.summaryTextComponent.layoutRect = Rect.create(
-        -13.5 + 1.4,
-        13.5 - 1.4,
+        -12.8 + 1.1,
+        12.8 - 1.1,
         -this.summaryViewportHeight * 0.5 + 1.1,
         this.summaryViewportHeight * 0.5 - 1.1
       )
-      this.summaryViewportSurface.size = new vec2(27, this.summaryViewportHeight)
+      this.summaryViewportSurface.size = new vec2(25.6, this.summaryViewportHeight)
       this.summaryVisibleLineCount = Math.max(1, Math.floor((this.summaryViewportHeight - 2.2) / this.textLineHeight(this.summaryTextComponent)))
       this.summaryLineOffset = Math.max(0, Math.min(this.summaryLineOffset, this.summaryLines.length - this.summaryVisibleLineCount))
       this.updateSummaryView()
     }
+    const usedHeight = activeRows.reduce((sum, row) => sum + row.item.overrideHeight, 0)
+      + Math.max(0, activeRows.length - 1) * this.contentFlex.rowGap
+      + this.contentFlex.paddingTop
+      + this.contentFlex.paddingBottom
+    this.contentFlex.height = Math.min(PANEL_MAX_CONTENT_HEIGHT, Math.max(17, usedHeight))
     this.contentFlex.clearItems()
     this.contentFlex.addItems(activeRows.map(row => row.item))
   }
