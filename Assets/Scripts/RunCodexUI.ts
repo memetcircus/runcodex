@@ -23,8 +23,14 @@ const USER_MESSAGE_VISIBLE_LINES = 4
 const USER_MESSAGE_HORIZONTAL_PADDING = 1.15
 const USER_MESSAGE_VERTICAL_PADDING = 0.75
 const USER_MESSAGE_LINE_WIDTH = 49
-const APPROVAL_VERTICAL_PADDING = 1.0
 const APPROVAL_ROW_GAP = 0.9
+const APPROVAL_CARD_PADDING = 0.9
+const APPROVAL_CARD_GAP = 0.55
+const APPROVAL_TITLE_HEIGHT = 1.55
+const APPROVAL_HINT_HEIGHT = 1.35
+const APPROVAL_BUTTON_HEIGHT = 5
+const APPROVAL_MAX_VISIBLE_LINES = 16
+const APPROVAL_TEXT_LINE_HEIGHT_MULTIPLIER = 1.45
 const HAND_SWIPE_THRESHOLD_CM = 2.5
 const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
@@ -62,8 +68,20 @@ export class RunCodexUI extends BaseScriptComponent {
   private approvalText!: SceneObject
   private approvalTextComponent!: Text
   private approvalTextItem!: FlexItem
+  private approvalCard!: SceneObject
+  private approvalCardSurface!: RoundedRectangle
+  private approvalCardFlex!: FlexLayout
+  private approvalCardItem!: FlexItem
+  private approvalCardRows: Array<{item: FlexItem, sceneObject: SceneObject}> = []
+  private approvalCardTitle!: Text
+  private approvalHint!: SceneObject
+  private approvalScrollProgress!: Text
+  private approvalLines: string[] = []
+  private approvalLineOffset = 0
+  private approvalVisibleLineCount = 1
+  private approvalBodyHeight = 0
+  private approvalProgressRegistered: boolean | null = null
   private approvalTopSpacer: {item: FlexItem, sceneObject: SceneObject} | null = null
-  private approvalBottomSpacer: {item: FlexItem, sceneObject: SceneObject} | null = null
   private summaryText!: SceneObject
   private summaryTextComponent!: Text
   private summaryMetaRow!: SceneObject
@@ -88,11 +106,11 @@ export class RunCodexUI extends BaseScriptComponent {
   private handProvider = HandInputData.getInstance()
   private cameraProvider = WorldCameraFinderProvider.getInstance()
   private handSwipe = {
-    left: {active: false, target: "summary" as "summary" | "userMessage", startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0},
-    right: {active: false, target: "summary" as "summary" | "userMessage", startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0}
+    left: {active: false, target: "summary" as "summary" | "userMessage" | "approval", startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0},
+    right: {active: false, target: "summary" as "summary" | "userMessage" | "approval", startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0}
   }
   private previewTouchActive = false
-  private previewTouchTarget: "summary" | "userMessage" | null = null
+  private previewTouchTarget: "summary" | "userMessage" | "approval" | null = null
   private previewTouchLastY = 0
   private previewTouchRemainder = 0
   private showingFullSummary = true
@@ -184,6 +202,9 @@ export class RunCodexUI extends BaseScriptComponent {
     this.findText("TaskName").textFill.color = coolWhite
     this.findText("TaskStatus").textFill.color = cyan
     this.findText("ApprovalExplanation").textFill.color = coolWhite
+    this.approvalCardTitle.textFill.color = cyan
+    const approvalHintText = this.approvalHint.getComponent("Component.Text") as Text
+    approvalHintText.textFill.color = new vec4(0.55, 0.76, 0.87, 1)
     this.findText("ApprovalFeedback").textFill.color = cyan
     this.summaryTextComponent.textFill.color = coolWhite
     this.summaryTextComponent.depthTest = true
@@ -279,13 +300,8 @@ export class RunCodexUI extends BaseScriptComponent {
       const reason = this.formatApprovalValue(message.params?.reason)
       const detail = reason ||
         (message.method === "item/fileChange/requestApproval" ? "Codex requests approval to change files." : "Codex requests approval to run a command.")
-      const maxApprovalTextLength = 240
-      const visibleDetail = detail.length > maxApprovalTextLength ? detail.slice(0, maxApprovalTextLength - 1).trimEnd() + "…" : detail
-      const approvalExplanation = this.findText("ApprovalExplanation")
-      approvalExplanation.text = "LIVE CODEX APPROVAL\n" + visibleDetail
-      approvalExplanation.size = 48
-      approvalExplanation.layoutRect = Rect.create(-11.9, 11.9, -0.75, 0.75)
-      this.findText("ApprovalFeedback").text = "Review the request, then choose Approve or Reject."
+      this.setApprovalDetail(detail)
+      this.findText("ApprovalFeedback").text = ""
       this.state = "Needs approval"
       this.refreshState()
       return
@@ -497,6 +513,7 @@ export class RunCodexUI extends BaseScriptComponent {
     button.onTriggerUp.add(() => {
       this.panel.enabled = true
       this.launcher.enabled = false
+      this.refreshState()
     if (this.liveMode && (!this.liveConnected || !this.codexReady)) {
         this.liveDisconnectRequested = false
         if (this.liveConnected) this.sendLiveRpc("initialize", {
@@ -689,16 +706,110 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approvalTopSpacer = {item: approvalTopSpacerItem, sceneObject: approvalTopSpacerObject}
     this.flexRows.push(this.approvalTopSpacer)
 
-    this.approvalTextComponent = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 3.5, 48)
+    this.approvalCard = global.scene.createSceneObject("ApprovalCard")
+    this.approvalCard.setParent(flex.getSceneObject())
+    this.approvalCard.enabled = false
+    this.approvalCardItem = this.approvalCard.createComponent(FlexItem.getTypeName()) as FlexItem
+    this.approvalCardItem.overrideWidth = 27
+    this.approvalCardItem.overrideHeight = 12
+    this.flexRows.push({item: this.approvalCardItem, sceneObject: this.approvalCard})
+    flex.addItems([this.approvalCardItem])
+
+    const approvalCardSurfaceObject = global.scene.createSceneObject("ApprovalCardSurface")
+    approvalCardSurfaceObject.setParent(this.approvalCard)
+    approvalCardSurfaceObject.getTransform().setLocalPosition(new vec3(0, 0, 0.08))
+    this.approvalCardSurface = approvalCardSurfaceObject.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    this.approvalCardSurface.initialize()
+    this.approvalCardSurface.size = new vec2(27, 12)
+    this.approvalCardSurface.setBackgroundGradient({
+      enabled: true,
+      type: "Linear",
+      start: new vec2(-1, 1),
+      end: new vec2(1, -1),
+      stop0: {enabled: true, color: new vec4(0.004, 0.018, 0.038, 1), percent: 0},
+      stop1: {enabled: true, color: new vec4(0.012, 0.05, 0.085, 1), percent: 1}
+    })
+    this.approvalCardSurface.border = true
+    this.approvalCardSurface.borderType = "Color"
+    this.approvalCardSurface.borderColor = new vec4(0.1, 0.58, 0.82, 1)
+    this.approvalCardSurface.borderSize = 0.07
+    this.approvalCardSurface.opacity = 1
+
+    const approvalCardContentObject = global.scene.createSceneObject("ApprovalCardContent")
+    approvalCardContentObject.setParent(this.approvalCard)
+    approvalCardContentObject.getTransform().setLocalPosition(new vec3(0, 0, 0.62))
+    this.approvalCardFlex = approvalCardContentObject.createComponent(FlexLayout.getTypeName()) as FlexLayout
+    this.approvalCardFlex.autoDiscoverItemsOnStart = false
+    this.approvalCardFlex.width = 25
+    this.approvalCardFlex.height = 12
+    this.approvalCardFlex.direction = FlexDirection.Column
+    this.approvalCardFlex.justifyContent = FlexJustify.Start
+    this.approvalCardFlex.alignItems = FlexAlign.Stretch
+    this.approvalCardFlex.rowGap = APPROVAL_CARD_GAP
+    this.approvalCardFlex.paddingTop = APPROVAL_CARD_PADDING
+    this.approvalCardFlex.paddingBottom = APPROVAL_CARD_PADDING
+    this.approvalCardFlex.paddingLeft = 1
+    this.approvalCardFlex.paddingRight = 1
+
+    this.approvalCardTitle = this.addText(this.approvalCardFlex, "ApprovalCardTitle", "LIVE CODEX APPROVAL", 23, APPROVAL_TITLE_HEIGHT, 38)
+    this.approvalCardTitle.weight = 650
+    this.approvalCardTitle.textFill.color = new vec4(0.32, 0.88, 1, 1)
+    this.approvalCardTitle.layoutRect = Rect.create(-11.35, 11.35, -0.65, 0.65)
+    this.approvalCardRows.push({item: this.approvalCardTitle.getSceneObject().getComponent(FlexItem.getTypeName()) as FlexItem, sceneObject: this.approvalCardTitle.getSceneObject()})
+
+    this.approvalTextComponent = this.addText(this.approvalCardFlex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 23, 3, 44)
     this.approvalText = this.approvalTextComponent.getSceneObject()
     this.approvalTextItem = this.approvalText.getComponent(FlexItem.getTypeName()) as FlexItem
+    this.approvalTextComponent.weight = 500
+    this.approvalTextComponent.lineSpacing = 1.02
     this.approvalTextComponent.verticalAlignment = VerticalAlignment.Top
-    this.approvalTextComponent.layoutRect = Rect.create(-11.9, 11.9, -0.75, 0.75)
-    this.approvalBottomSpacer = this.createFlexSpacer(flex, "ApprovalActionsGap", APPROVAL_ROW_GAP)
-    const approvalButtons = this.createButtonRow(flex, "ApprovalButtonsRow", 27, 5)
-    this.approvalButtonRow = approvalButtons.getSceneObject()
-    this.approveButton = this.addButton(approvalButtons, "ApproveButton", "Approve", 12.8, () => this.approve(), 5)
-    this.rejectButton = this.addButton(approvalButtons, "RejectButton", "Reject", 12.8, () => this.reject(), 5)
+    this.approvalTextComponent.verticalOverflow = VerticalOverflow.Truncate
+    this.approvalTextComponent.horizontalOverflow = HorizontalOverflow.Wrap
+    this.approvalTextComponent.layoutRect = Rect.create(-11.3, 11.3, -1.25, 1.25)
+    this.approvalCardRows.push({item: this.approvalTextItem, sceneObject: this.approvalText})
+    this.approvalLines = this.wrapTextToWidth(this.approvalTextComponent.text, this.approvalTextComponent, 21.8)
+
+    const approvalScrollProgressObject = global.scene.createSceneObject("ApprovalScrollProgress")
+    approvalScrollProgressObject.setParent(this.approvalCardFlex.getSceneObject())
+    approvalScrollProgressObject.enabled = false
+    this.approvalScrollProgress = approvalScrollProgressObject.createComponent("Component.Text") as Text
+    this.approvalScrollProgress.text = ""
+    this.approvalScrollProgress.size = 22
+    this.approvalScrollProgress.depthTest = true
+    this.approvalScrollProgress.textFill.color = new vec4(0.32, 0.78, 0.94, 1)
+    this.approvalScrollProgress.horizontalAlignment = HorizontalAlignment.Right
+    this.approvalScrollProgress.verticalAlignment = VerticalAlignment.Center
+    this.approvalScrollProgress.layoutRect = Rect.create(-11, 11, -0.45, 0.45)
+    const approvalProgressItem = approvalScrollProgressObject.createComponent(FlexItem.getTypeName()) as FlexItem
+    approvalProgressItem.overrideWidth = 23
+    approvalProgressItem.overrideHeight = 1
+    this.approvalCardFlex.addItems([approvalProgressItem])
+    this.approvalCardRows.push({item: approvalProgressItem, sceneObject: approvalScrollProgressObject})
+
+    const approvalButtonsObject = global.scene.createSceneObject("ApprovalButtonsRow")
+    approvalButtonsObject.setParent(this.approvalCardFlex.getSceneObject())
+    const approvalButtons = approvalButtonsObject.createComponent(FlexLayout.getTypeName()) as FlexLayout
+    approvalButtons.autoDiscoverItemsOnStart = false
+    approvalButtons.width = 23
+    approvalButtons.height = APPROVAL_BUTTON_HEIGHT
+    approvalButtons.direction = FlexDirection.Row
+    approvalButtons.justifyContent = FlexJustify.SpaceBetween
+    approvalButtons.alignItems = FlexAlign.Center
+    const approvalButtonsItem = approvalButtonsObject.createComponent(FlexItem.getTypeName()) as FlexItem
+    approvalButtonsItem.overrideWidth = 23
+    approvalButtonsItem.overrideHeight = APPROVAL_BUTTON_HEIGHT
+    this.approvalButtonRow = approvalButtonsObject
+    this.approvalCardFlex.addItems([approvalButtonsItem])
+    this.approvalCardRows.push({item: approvalButtonsItem, sceneObject: approvalButtonsObject})
+    this.approveButton = this.addButton(approvalButtons, "ApproveButton", "Approve", 11.2, () => this.approve(), APPROVAL_BUTTON_HEIGHT)
+    this.rejectButton = this.addButton(approvalButtons, "RejectButton", "Reject", 11.2, () => this.reject(), APPROVAL_BUTTON_HEIGHT)
+
+    const approvalHintText = this.addText(this.approvalCardFlex, "ApprovalHint", "Review the request, then choose Approve or Reject.", 23, APPROVAL_HINT_HEIGHT, 32)
+    this.approvalHint = approvalHintText.getSceneObject()
+    approvalHintText.textFill.color = new vec4(0.55, 0.76, 0.87, 1)
+    approvalHintText.layoutRect = Rect.create(-11.2, 11.2, -0.55, 0.55)
+    this.approvalCardRows.push({item: this.approvalHint.getComponent(FlexItem.getTypeName()) as FlexItem, sceneObject: this.approvalHint})
+
     this.feedbackText = this.addText(flex, "ApprovalFeedback", "", 27, 2.7, 42).getSceneObject()
     const summaryMeta = this.createButtonRow(flex, "ConversationProgressRow", 27, 1.4)
     summaryMeta.justifyContent = FlexJustify.End
@@ -866,6 +977,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.panel.enabled = false
     this.opaqueBackdrop.enabled = false
     this.launcher.enabled = true
+    this.refreshState()
   }
 
   private closeRunCodex(): void {
@@ -887,18 +999,16 @@ export class RunCodexUI extends BaseScriptComponent {
   private refreshState(): void {
     const liveSessionUsable = this.liveMode && this.liveConnected && this.codexReady && this.liveThreadId.length > 0
     this.statusText.text = this.state
+    this.statusText.size = this.state === "Needs approval" ? 42 : 61
     if (this.state !== "Working") this.resetWorkingBreath()
     const approvalVisible = this.state === "Needs approval" && (!this.liveMode || (liveSessionUsable && this.liveApprovalId !== null))
-    this.cue.enabled = approvalVisible
-    this.approvalText.enabled = approvalVisible
-    this.approvalButtonRow.enabled = approvalVisible
-    this.approveButton.enabled = approvalVisible
-    this.rejectButton.enabled = approvalVisible
+    this.cue.enabled = approvalVisible && !this.panel.enabled
+    this.approvalCard.enabled = approvalVisible
     const feedback = this.feedbackText.getComponent("Component.Text") as Text
     if (this.state !== "Needs approval" && feedback.text === "Review the request, then choose Approve or Reject.") {
       feedback.text = ""
     }
-    this.feedbackText.enabled = feedback.text.length > 0 && (!this.liveMode || liveSessionUsable)
+    this.feedbackText.enabled = feedback.text.length > 0 && (!this.liveMode || liveSessionUsable) && !approvalVisible
     const showConversation = liveSessionUsable && (this.composerOpen || this.liveSummary.length > 0 || this.state === "Done")
     const showSummary = this.liveMode ? showConversation : this.state === "Done"
     this.summaryMetaRow.enabled = showSummary
@@ -1259,28 +1369,79 @@ export class RunCodexUI extends BaseScriptComponent {
     return Math.max(0.6, (component.size / 43.886) * (component.lineSpacing || 1.08))
   }
 
+  private setApprovalDetail(detail: string): void {
+    this.approvalLines = this.wrapTextToWidth(detail, this.approvalTextComponent, 21.8)
+    if (this.approvalLines.length === 0) this.approvalLines = ["Codex requests approval."]
+    this.approvalLineOffset = 0
+    this.updateApprovalLayout()
+  }
+
   private updateApprovalLayout(): void {
-    if (!this.approvalTextComponent || !this.approvalTextItem) return
-    const approvalText = this.approvalTextComponent.text
-    const lines = this.wrapTextToWidth(approvalText, this.approvalTextComponent, 23.8)
-    this.approvalTextComponent.text = lines.join("\n")
-    const height = Math.max(3.1, lines.length * this.textLineHeight(this.approvalTextComponent) + APPROVAL_VERTICAL_PADDING * 2)
-    this.approvalTextItem.overrideHeight = height
-    this.approvalTextComponent.layoutRect = Rect.create(
-      -11.9,
-      11.9,
-      -height * 0.5 + APPROVAL_VERTICAL_PADDING,
-      height * 0.5 - APPROVAL_VERTICAL_PADDING
-    )
+    if (!this.approvalTextComponent || !this.approvalTextItem || !this.approvalCardFlex) return
+    if (this.approvalLines.length === 0) this.approvalLines = ["Codex requests approval."]
+
+    // Account for the optional conversation gap before measuring the space
+    // available to the card in the parent panel.
+    const showGap = this.approvalCard.enabled && this.lastUserMessageRow.enabled
     if (this.approvalTopSpacer) {
-      const showGap = this.state === "Needs approval" && this.lastUserMessageRow.enabled
       this.approvalTopSpacer.sceneObject.enabled = showGap
       this.approvalTopSpacer.item.overrideHeight = showGap ? APPROVAL_ROW_GAP : 0
     }
-    if (this.approvalBottomSpacer) {
-      this.approvalBottomSpacer.sceneObject.enabled = this.state === "Needs approval"
-      this.approvalBottomSpacer.item.overrideHeight = APPROVAL_ROW_GAP
+
+    // Text bounds include font ascenders/descenders beyond the nominal line
+    // advance used by the other compact rows. Keep enough vertical room for
+    // every wrapped line so the final line does not clip above the buttons.
+    const lineHeight = this.textLineHeight(this.approvalTextComponent) * APPROVAL_TEXT_LINE_HEIGHT_MULTIPLIER
+    const otherRows = this.flexRows.filter(row => row.sceneObject.enabled && row.item !== this.approvalCardItem)
+    const otherHeight = otherRows.reduce((sum, row) => sum + row.item.overrideHeight, 0)
+    const cardGapCount = this.approvalCard.enabled ? otherRows.length : 0
+    const availableCardHeight = Math.max(8, this.contentFlex.height - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - cardGapCount * this.contentFlex.rowGap)
+    const shortFixedHeight = APPROVAL_CARD_PADDING * 2 + APPROVAL_TITLE_HEIGHT + APPROVAL_BUTTON_HEIGHT + APPROVAL_HINT_HEIGHT + APPROVAL_CARD_GAP * 3
+    const scrollFixedHeight = shortFixedHeight + 1 + APPROVAL_CARD_GAP
+    const scrollCapacity = Math.max(1, Math.floor((availableCardHeight - scrollFixedHeight) / lineHeight))
+    this.approvalVisibleLineCount = Math.min(APPROVAL_MAX_VISIBLE_LINES, this.approvalLines.length, scrollCapacity)
+    const hasOverflow = this.approvalLines.length > this.approvalVisibleLineCount
+    this.approvalBodyHeight = Math.max(lineHeight, this.approvalVisibleLineCount * lineHeight)
+    const cardHeight = shortFixedHeight + this.approvalBodyHeight + (hasOverflow ? 1 + APPROVAL_CARD_GAP : 0)
+
+    this.approvalLineOffset = Math.max(0, Math.min(this.approvalLineOffset, this.approvalLines.length - this.approvalVisibleLineCount))
+    this.approvalTextComponent.text = this.approvalLines
+      .slice(this.approvalLineOffset, this.approvalLineOffset + this.approvalVisibleLineCount)
+      .join("\n")
+    this.approvalTextItem.overrideHeight = this.approvalBodyHeight
+    this.approvalTextComponent.layoutRect = Rect.create(
+      -11.35,
+      11.35,
+      -this.approvalBodyHeight * 0.5 + 0.12,
+      this.approvalBodyHeight * 0.5 - 0.12
+    )
+    this.approvalScrollProgress.text = hasOverflow
+      ? "SCROLL · " + (this.approvalLineOffset + 1) + "–" + Math.min(this.approvalLines.length, this.approvalLineOffset + this.approvalVisibleLineCount) + " / " + this.approvalLines.length
+      : ""
+    this.approvalScrollProgress.getSceneObject().enabled = hasOverflow
+
+    this.approvalCardTitle.getSceneObject().getComponent(FlexItem.getTypeName()).overrideHeight = APPROVAL_TITLE_HEIGHT
+    const progressItem = this.approvalScrollProgress.getSceneObject().getComponent(FlexItem.getTypeName()) as FlexItem
+    progressItem.overrideHeight = 1
+    const buttonRowItem = this.approvalButtonRow.getComponent(FlexItem.getTypeName()) as FlexItem
+    buttonRowItem.overrideHeight = APPROVAL_BUTTON_HEIGHT
+    const hintItem = this.approvalHint.getComponent(FlexItem.getTypeName()) as FlexItem
+    hintItem.overrideHeight = APPROVAL_HINT_HEIGHT
+
+    this.approvalCardFlex.height = cardHeight
+    this.approvalCardItem.overrideHeight = cardHeight
+    this.approvalCardSurface.size = new vec2(27, cardHeight)
+    if (this.approvalProgressRegistered !== hasOverflow) {
+      this.approvalCardFlex.clearItems()
+      this.approvalCardFlex.addItems(this.approvalCardRows.filter(row => row.sceneObject.enabled).map(row => row.item))
+      this.approvalProgressRegistered = hasOverflow
     }
+  }
+
+  private moveApprovalLines(delta: number): void {
+    const maxOffset = Math.max(0, this.approvalLines.length - this.approvalVisibleLineCount)
+    this.approvalLineOffset = Math.max(0, Math.min(maxOffset, this.approvalLineOffset + delta))
+    this.updateApprovalLayout()
   }
 
   private wrapTextToWidth(value: string, component: Text, width: number): string[] {
@@ -1331,6 +1492,11 @@ export class RunCodexUI extends BaseScriptComponent {
     return Math.abs(local.x) <= 13.5 && Math.abs(local.y) <= this.summaryViewportHeight * 0.5
   }
 
+  private isPointInApprovalViewport(worldPosition: vec3): boolean {
+    const local = this.approvalText.getTransform().getInvertedWorldTransform().multiplyPoint(worldPosition)
+    return Math.abs(local.x) <= 11.35 && Math.abs(local.y) <= this.approvalBodyHeight * 0.5
+  }
+
   private beginHandSwipe(handType: "left" | "right", hand: BaseHand): void {
     if (!hand.isTracked()) return
     // Use the pinch center to hit-test the text area; wrist position is the
@@ -1340,6 +1506,12 @@ export class RunCodexUI extends BaseScriptComponent {
     if (this.showingFullSummary && this.state === "Done" && this.isPointInSummaryViewport(pinchCenter)) {
       swipe.target = "summary"
     } else if (
+      this.approvalCard.enabled &&
+      this.approvalLines.length > this.approvalVisibleLineCount &&
+      this.isPointInApprovalViewport(pinchCenter)
+    ) {
+      swipe.target = "approval"
+    } else if (
       this.lastUserMessageRow.enabled &&
       this.userMessageLines.length > this.userMessageVisibleLineCount &&
       this.isPointInUserMessageViewport(pinchCenter)
@@ -1348,7 +1520,7 @@ export class RunCodexUI extends BaseScriptComponent {
     } else {
       return
     }
-    const viewport = swipe.target === "summary" ? this.summaryViewport : this.userMessageViewport
+    const viewport = swipe.target === "summary" ? this.summaryViewport : swipe.target === "approval" ? this.approvalText : this.userMessageViewport
     const local = viewport.getTransform().getInvertedWorldTransform().multiplyPoint(hand.wrist.position)
     swipe.active = true
     swipe.startY = local.y
@@ -1369,7 +1541,7 @@ export class RunCodexUI extends BaseScriptComponent {
       this.endHandSwipe(handType)
       return
     }
-    const viewport = swipe.target === "summary" ? this.summaryViewport : this.userMessageViewport
+    const viewport = swipe.target === "summary" ? this.summaryViewport : swipe.target === "approval" ? this.approvalText : this.userMessageViewport
     const local = viewport.getTransform().getInvertedWorldTransform().multiplyPoint(hand.wrist.position)
     const delta = local.y - swipe.startY
     swipe.smoothedDelta = swipe.smoothedDelta * 0.65 + delta * 0.35
@@ -1387,6 +1559,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const lines = Math.max(1, Math.round(Math.abs(swipe.maxDelta) / HAND_SWIPE_THRESHOLD_CM))
     const delta = swipe.maxDelta > 0 ? lines : -lines
     if (swipe.target === "summary") this.moveSummaryLines(delta)
+    else if (swipe.target === "approval") this.moveApprovalLines(delta)
     else this.moveUserMessageLines(delta)
   }
 
@@ -1394,6 +1567,12 @@ export class RunCodexUI extends BaseScriptComponent {
     const position = event.getTouchPosition()
     if (this.showingFullSummary && this.state === "Done" && this.isScreenPointInSummaryViewport(position)) {
       this.previewTouchTarget = "summary"
+    } else if (
+      this.approvalCard.enabled &&
+      this.approvalLines.length > this.approvalVisibleLineCount &&
+      this.isScreenPointInApprovalViewport(position)
+    ) {
+      this.previewTouchTarget = "approval"
     } else if (
       this.lastUserMessageRow.enabled &&
       this.userMessageLines.length > this.userMessageVisibleLineCount &&
@@ -1420,6 +1599,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const lineSteps = Math.trunc(this.previewTouchRemainder / PREVIEW_SWIPE_LINE_THRESHOLD)
     if (lineSteps !== 0) {
       if (this.previewTouchTarget === "summary") this.moveSummaryLines(lineSteps)
+      else if (this.previewTouchTarget === "approval") this.moveApprovalLines(lineSteps)
       else if (this.previewTouchTarget === "userMessage") this.moveUserMessageLines(lineSteps)
       this.previewTouchRemainder -= lineSteps * PREVIEW_SWIPE_LINE_THRESHOLD
     }
@@ -1442,6 +1622,24 @@ export class RunCodexUI extends BaseScriptComponent {
       world.multiplyPoint(new vec3(-13.5, this.summaryViewportHeight * 0.5, 0)),
       world.multiplyPoint(new vec3(13.5, -this.summaryViewportHeight * 0.5, 0)),
       world.multiplyPoint(new vec3(13.5, this.summaryViewportHeight * 0.5, 0))
+    ].map((corner) => camera.worldSpaceToScreenSpace(corner))
+    const minX = Math.min(...corners.map((p) => p.x))
+    const maxX = Math.max(...corners.map((p) => p.x))
+    const minY = Math.min(...corners.map((p) => p.y))
+    const maxY = Math.max(...corners.map((p) => p.y))
+    const inRect = (y: number): boolean => point.x >= minX && point.x <= maxX && y >= minY && y <= maxY
+    return inRect(point.y) || inRect(1 - point.y)
+  }
+
+  private isScreenPointInApprovalViewport(point: vec2): boolean {
+    const world = this.approvalText.getTransform().getWorldTransform()
+    const camera = this.cameraProvider.getComponent()
+    const halfHeight = this.approvalBodyHeight * 0.5
+    const corners = [
+      world.multiplyPoint(new vec3(-11.35, -halfHeight, 0)),
+      world.multiplyPoint(new vec3(-11.35, halfHeight, 0)),
+      world.multiplyPoint(new vec3(11.35, -halfHeight, 0)),
+      world.multiplyPoint(new vec3(11.35, halfHeight, 0))
     ].map((corner) => camera.worldSpaceToScreenSpace(corner))
     const minX = Math.min(...corners.map((p) => p.x))
     const maxX = Math.max(...corners.map((p) => p.x))
