@@ -1695,13 +1695,12 @@
   Enabled: true
   ScriptAsset: !<reference> 9a76d2aa-d2cc-4e54-8027-69607966492e
   ScriptInputsDefault:
-    bridgeUrl: true
-    bridgeToken: true
+    {}
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
-      bridgeUrl: ""
+      bridgeUrl: "ws://127.0.0.1:8765/runcodex"
       bridgeToken: ""
   ScriptTypes:
     "":
@@ -2199,8 +2198,8 @@
     HasSegmentScaleCompensation: false
   Children:
     - !<own> f6687ab7-52ac-408d-a892-8a9559125450
-    []
   Components:
+    []
 - !<SceneObject/ad8e2006-f8c8-4e8f-b68a-d034fb20f540>
   PrefabRemaps:
     []
@@ -2213,9 +2212,9 @@
     Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
     HasSegmentScaleCompensation: false
   Children:
+    []
   Components:
     - !<own> 344063ec-076a-47d8-9827-0c317f50989d
-    []
 - !<SceneObject/b22d97e6-4c06-4135-af29-d26adb2b9d86>
   PrefabRemaps:
     []

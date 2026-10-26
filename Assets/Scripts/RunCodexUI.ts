@@ -4,7 +4,6 @@ import {FlexAlign, FlexDirection, FlexJustify} from "SpectaclesUIKit.lspkg/Scrip
 import {RoundedRectangle} from "SpectaclesUIKit.lspkg/Scripts/Visuals/RoundedRectangle/RoundedRectangle"
 import {Button} from "SpectaclesUIKit.lspkg/Scripts/Components/Button/Button"
 import {ElementContent} from "SpectaclesUIKit.lspkg/Scripts/Components/Content/ElementContent"
-import {Billboard} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Billboard/Billboard"
 import {HandInputData} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/HandInputData"
 import {BaseHand} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/BaseHand"
 import WorldCameraFinderProvider from "SpectaclesInteractionKit.lspkg/Providers/CameraProvider/WorldCameraFinderProvider"
@@ -36,8 +35,8 @@ const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
 const LIVE_CONNECTING_LABEL = "CONNECTING TO CODEX BRIDGE"
 const LIVE_OFFLINE_LABEL = "CODEX BRIDGE OFFLINE"
-const LAUNCHER_CAMERA_OFFSET = new vec3(0, -1, -105)
-const PANEL_CAMERA_OFFSET = new vec3(0, -3, -105)
+const LAUNCHER_PLACEMENT_OFFSET = new vec3(0, -1, -105)
+const PANEL_PLACEMENT_OFFSET = new vec3(0, -3, -105)
 
 @component
 export class RunCodexUI extends BaseScriptComponent {
@@ -57,6 +56,7 @@ export class RunCodexUI extends BaseScriptComponent {
   private feedbackText!: SceneObject
   private closeButton!: SceneObject
   private restartButton!: SceneObject
+  private movePanelButton!: SceneObject
   private approvalButtonRow!: SceneObject
   private actionsRow!: SceneObject
   private flexRows: Array<{item: FlexItem, sceneObject: SceneObject}> = []
@@ -163,7 +163,6 @@ export class RunCodexUI extends BaseScriptComponent {
     this.panel.enabled = false
 
     this.createEvent("UpdateEvent").bind(() => {
-      this.updateHeadLockedPlacement()
       this.updateHandSwipes()
       this.updateWorkingBreath()
     })
@@ -212,7 +211,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryTextComponent.textFill.color = coolWhite
     this.summaryTextComponent.depthTest = true
     this.summaryProgressText.textFill.color = cyan
-    this.updateHeadLockedPlacement()
+    this.placeAtCurrentView()
     if (this.bridgeUrl.trim().length > 0 && this.bridgeToken.trim().length > 0) {
       this.liveMode = true
       this.setConnectionLabel(LIVE_CONNECTING_LABEL)
@@ -503,16 +502,14 @@ export class RunCodexUI extends BaseScriptComponent {
   private createRunButton(): void {
     const root = global.scene.createSceneObject("RunCodexButton")
     this.launcher = root
-    root.getTransform().setWorldPosition(new vec3(-27, 2, -97))
     root.createComponent("Component.Canvas")
-    root.createComponent(Billboard.getTypeName())
     const button = root.createComponent(Button.getTypeName()) as Button
     button.setTheme("SnapOS3", "Prism")
-    button.size = new vec3(29, 8, 0.6)
+    button.size = new vec3(14, 5.4, 0.6)
     const label = root.createComponent(ElementContent.getTypeName()) as ElementContent
-    label.text = "Open RunCodex"
-    label.textSize = 56
-    label.sizeOverride = new vec2(27, 7)
+    label.text = "RunCodex"
+    label.textSize = 36
+    label.sizeOverride = new vec2(13, 4.8)
     label.contentAlignment = "center"
     button.onTriggerUp.add(() => {
       this.panel.enabled = true
@@ -529,11 +526,11 @@ export class RunCodexUI extends BaseScriptComponent {
 
     const sampleTag = global.scene.createSceneObject("ExternalSampleDataLabel")
     sampleTag.setParent(root)
-    sampleTag.getTransform().setLocalPosition(new vec3(0, -8.2, 0.3))
+    sampleTag.getTransform().setLocalPosition(new vec3(0, -5.1, 0.3))
     this.launcherSampleLabel = sampleTag.createComponent(ElementContent.getTypeName()) as ElementContent
     this.launcherSampleLabel.text = SAMPLE_LABEL
-    this.launcherSampleLabel.textSize = 62
-    this.launcherSampleLabel.sizeOverride = new vec2(40, 6)
+    this.launcherSampleLabel.textSize = 34
+    this.launcherSampleLabel.sizeOverride = new vec2(38, 3.3)
     this.launcherSampleLabel.contentAlignment = "center"
 
     const cue = global.scene.createSceneObject("NeedsApprovalCue")
@@ -551,9 +548,7 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private createPanel(): void {
     this.panel = global.scene.createSceneObject("RunCodexStatusPanel")
-    this.panel.getTransform().setWorldPosition(new vec3(-27, 2, -97))
     this.panel.createComponent("Component.Canvas")
-    this.panel.createComponent(Billboard.getTypeName())
     this.opaqueBackdrop = this.findObject("RunCodexOpaqueBackdrop")
     this.opaqueBackdrop.setParent(this.panel)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
@@ -857,6 +852,16 @@ export class RunCodexUI extends BaseScriptComponent {
     refreshSpacerItem.overrideHeight = 0.65
     this.refreshToActionsSpacer = {item: refreshSpacerItem, sceneObject: refreshSpacerObject}
     this.flexRows.push(this.refreshToActionsSpacer)
+    const placementRow = this.createButtonRow(flex, "PanelPlacementActionsRow", 27, 4.8)
+    this.movePanelButton = this.addButton(
+      placementRow,
+      "MovePanelButton",
+      "Move / Recenter",
+      25.8,
+      () => this.placeAtCurrentView(),
+      4.2,
+      30
+    )
     const actions = this.createButtonRow(flex, "PanelActionsRow", 27, 5)
     this.actionsRow = actions.getSceneObject()
     this.closeButton = this.addButton(actions, "ClosePanelButton", "Close panel", 12.8, () => this.closePanel(), 5)
@@ -1065,16 +1070,22 @@ export class RunCodexUI extends BaseScriptComponent {
     this.statusText.textFill.color = new vec4(0.3, 0.88, 1, alpha)
   }
 
-  private updateHeadLockedPlacement(): void {
+  private placeAtCurrentView(): void {
     if (!this.launcher || !this.panel) return
     const camera = this.cameraProvider.getComponent()
     if (!camera) return
 
-    // Keep the launcher and open panel at comfortable offsets in the camera's
-    // local space. Their existing Billboards continue to face the user.
-    const cameraWorld = camera.getSceneObject().getTransform().getWorldTransform()
-    this.launcher.getTransform().setWorldPosition(cameraWorld.multiplyPoint(LAUNCHER_CAMERA_OFFSET))
-    this.panel.getTransform().setWorldPosition(cameraWorld.multiplyPoint(PANEL_CAMERA_OFFSET))
+    // Place once in front of the current view. These world transforms stay
+    // fixed until the user explicitly chooses Move / Recenter.
+    const cameraTransform = camera.getSceneObject().getTransform()
+    const cameraWorld = cameraTransform.getWorldTransform()
+    const cameraRotation = cameraTransform.getWorldRotation()
+    const launcherTransform = this.launcher.getTransform()
+    launcherTransform.setWorldPosition(cameraWorld.multiplyPoint(LAUNCHER_PLACEMENT_OFFSET))
+    launcherTransform.setWorldRotation(cameraRotation)
+    const panelTransform = this.panel.getTransform()
+    panelTransform.setWorldPosition(cameraWorld.multiplyPoint(PANEL_PLACEMENT_OFFSET))
+    panelTransform.setWorldRotation(cameraRotation)
   }
 
   private resetWorkingBreath(): void {
