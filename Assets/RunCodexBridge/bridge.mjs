@@ -142,7 +142,9 @@ function forwardRpc(message) {
   }
   if (message.method === 'thread/resume') message.params = {threadId: params.threadId, excludeTurns: true}
   if (message.method === 'thread/turns/list') {
-    message.params = {threadId: params.threadId, limit: 1, sortDirection: 'desc', itemsView: 'full'}
+    // Keep a small recent window so Refresh Codex status restores the latest
+    // user prompt and Codex response instead of only the latest turn.
+    message.params = {threadId: params.threadId, limit: 5, sortDirection: 'desc', itemsView: 'full'}
   }
   const clientId = message.id
   if (clientId !== undefined) {
@@ -171,6 +173,14 @@ function handleCodexMessage(message) {
     }
     sendClient(message)
     return
+  }
+  if (message.method === 'serverRequest/resolved') {
+    const requestId = message.params?.requestId
+    if (requestId !== undefined && requestId !== null) {
+      const id = String(requestId)
+      pendingApprovals.delete(id)
+      pendingApprovalMessages.delete(id)
+    }
   }
   if (message.id !== undefined && pairedClient && pairedState.rpcIds.has(String(message.id))) {
     const clientId = pairedState.rpcIds.get(String(message.id))

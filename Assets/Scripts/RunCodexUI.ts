@@ -17,6 +17,10 @@ const SUMMARY = "Updated 8 tests, removed 2 flaky waits, and all checks passed."
 const SUMMARY_VIEWPORT_HEIGHT = 15.5
 const SUMMARY_VISIBLE_LINES = 11
 const SUMMARY_LINE_WIDTH = 52
+const USER_MESSAGE_BUBBLE_HEIGHT = 7.4
+const USER_MESSAGE_VISIBLE_LINES = 4
+// The larger chat font needs fewer characters to fill the measured bubble.
+const USER_MESSAGE_LINE_WIDTH = 49
 const HAND_SWIPE_THRESHOLD_CM = 2.5
 const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
@@ -48,16 +52,19 @@ export class RunCodexUI extends BaseScriptComponent {
   private refreshToActionsSpacer: {item: FlexItem, sceneObject: SceneObject} | null = null
   private approved = false
   private statusText!: Text
-  private taskDescriptionText!: Text
+  private statusTextObject!: SceneObject
+  private statusBreathElapsed = 0
+  private statusBreathOffsetX = 0
   private approvalText!: SceneObject
   private summaryText!: SceneObject
   private summaryTextComponent!: Text
-  private summaryHeadingRow!: SceneObject
-  private summaryHeadingText!: Text
+  private summaryMetaRow!: SceneObject
   private summaryViewport!: SceneObject
   private summaryViewportBackdrop!: SceneObject
   private summaryViewportSurface!: RoundedRectangle
   private summaryProgressText!: Text
+  private userMessageViewport!: SceneObject
+  private userMessageProgressText!: Text
   private approveButton!: SceneObject
   private rejectButton!: SceneObject
   private summaryLines: string[] = []
@@ -65,10 +72,11 @@ export class RunCodexUI extends BaseScriptComponent {
   private handProvider = HandInputData.getInstance()
   private cameraProvider = WorldCameraFinderProvider.getInstance()
   private handSwipe = {
-    left: {active: false, startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0},
-    right: {active: false, startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0}
+    left: {active: false, target: "summary" as "summary" | "userMessage", startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0},
+    right: {active: false, target: "summary" as "summary" | "userMessage", startY: 0, smoothedDelta: 0, maxDelta: 0, startedAt: 0}
   }
   private previewTouchActive = false
+  private previewTouchTarget: "summary" | "userMessage" | null = null
   private previewTouchLastY = 0
   private previewTouchRemainder = 0
   private showingFullSummary = true
@@ -76,8 +84,12 @@ export class RunCodexUI extends BaseScriptComponent {
   private liveActionsRow!: SceneObject
   private composeButton!: SceneObject
   private sendButton!: SceneObject
-  private lastUserMessageText!: SceneObject
+  private lastUserMessageRow!: SceneObject
+  private lastUserMessageText!: Text
   private lastUserMessage = ""
+  private userMessageLines: string[] = []
+  private userMessageLineOffset = 0
+  private displayedUserMessage = ""
   private messageDraft = ""
   private finalizedVoiceText = ""
   private composerOpen = false
@@ -113,7 +125,10 @@ export class RunCodexUI extends BaseScriptComponent {
     this.refreshState()
     this.panel.enabled = false
 
-    this.createEvent("UpdateEvent").bind(() => this.updateHandSwipes())
+    this.createEvent("UpdateEvent").bind(() => {
+      this.updateHandSwipes()
+      this.updateWorkingBreath()
+    })
     this.createEvent("TouchStartEvent").bind((event: TouchStartEvent) => this.onPreviewTouchStart(event))
     this.createEvent("TouchMoveEvent").bind((event: TouchMoveEvent) => this.onPreviewTouchMove(event))
     this.createEvent("TouchEndEvent").bind((event: TouchEndEvent) => this.onPreviewTouchEnd(event))
@@ -151,12 +166,10 @@ export class RunCodexUI extends BaseScriptComponent {
     this.findText("SampleDataLabel").textFill.color = cyan
     this.findText("TaskName").textFill.color = coolWhite
     this.findText("TaskStatus").textFill.color = cyan
-    this.findText("TaskDescription").textFill.color = new vec4(0.72, 0.86, 0.95, 1)
     this.findText("ApprovalExplanation").textFill.color = coolWhite
     this.findText("ApprovalFeedback").textFill.color = cyan
     this.summaryTextComponent.textFill.color = coolWhite
     this.summaryTextComponent.depthTest = true
-    this.findText("SummaryHeading").textFill.color = new vec4(0.72, 0.88, 0.98, 1)
     this.summaryProgressText.textFill.color = cyan
     if (this.bridgeUrl.trim().length > 0 && this.bridgeToken.trim().length > 0) {
       this.liveMode = true
@@ -307,10 +320,9 @@ export class RunCodexUI extends BaseScriptComponent {
         this.liveThreadId = thread.id
         this.setConnectionLabel(LIVE_CONNECTED_LABEL)
         this.findText("TaskName").text = thread.name || "Codex task"
-        this.findText("TaskDescription").text = "Live Codex session · this project"
         this.syncThreadStatus(thread.status)
         this.sendLiveRpc("thread/resume", {threadId: thread.id, excludeTurns: true})
-        this.sendLiveRpc("thread/turns/list", {threadId: thread.id, limit: 1, sortDirection: "desc", itemsView: "full"})
+        this.sendLiveRpc("thread/turns/list", {threadId: thread.id, limit: 5, sortDirection: "desc", itemsView: "full"})
       } else if (method === "thread/turns/list") {
         this.readLiveTurnSummary(message.result?.data || [])
       } else if ((method === "turn/start" || method === "turn/steer") && this.pendingSendRpcId === Number(message.id)) {
@@ -323,7 +335,7 @@ export class RunCodexUI extends BaseScriptComponent {
         this.messageDraft = ""
         this.composerOpen = false
         this.lastUserMessage = sentText
-      ;(this.lastUserMessageText.getComponent("Component.Text") as Text).text = "YOU  ·  " + sentText
+        this.lastUserMessageText.text = sentText
         this.liveSummary = ""
         this.summaryLines = []
         this.summaryLineOffset = 0
@@ -370,9 +382,17 @@ export class RunCodexUI extends BaseScriptComponent {
         if (this.state === "Done") this.showingFullSummary = true
         this.refreshState()
       }
-    } else if (message.method === "serverRequest/resolved" && this.liveApprovalId !== null) {
-      this.liveApprovalId = null
-      this.liveApprovalMethod = ""
+    } else if (message.method === "serverRequest/resolved") {
+      const resolvedRequestId = params.requestId
+      if (resolvedRequestId !== undefined && this.liveApprovalId !== null && String(resolvedRequestId) === String(this.liveApprovalId)) {
+        this.liveApprovalId = null
+        this.liveApprovalMethod = ""
+        if (this.state === "Needs approval") {
+          this.state = "Working"
+          this.findText("ApprovalFeedback").text = "This approval request is no longer pending."
+          this.refreshState()
+        }
+      }
     }
   }
 
@@ -384,24 +404,22 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private readLiveTurnSummary(turns: any[]): void {
     if (!turns.length) return
-    const turn = turns[0].turn || turns[0]
-    const items = turn.items || turns[0].items || []
-    if (turn.status === "inProgress" || turn.status === "in_progress") this.currentTurnId = turn.id || ""
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i]?.type === "userMessage") {
-        const userText = this.messageText(items[i])
-        if (userText) {
-          this.lastUserMessage = userText
-          ;(this.lastUserMessageText.getComponent("Component.Text") as Text).text = "YOU  ·  " + userText.slice(0, 180)
-        }
-      } else if (items[i]?.type === "agentMessage") {
-        const text = this.messageText(items[i])
-        if (text) {
-          this.setLiveSummary(text)
-        }
+    const newestTurn = turns[0].turn || turns[0]
+    if (newestTurn.status === "inProgress" || newestTurn.status === "in_progress") this.currentTurnId = newestTurn.id || ""
+    let newestUserText = ""
+    let newestAgentText = ""
+    for (const entry of turns) {
+      const turn = entry.turn || entry
+      const items = turn.items || entry.items || []
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (!newestUserText && items[i]?.type === "userMessage") newestUserText = this.messageText(items[i])
+        if (!newestAgentText && items[i]?.type === "agentMessage") newestAgentText = this.messageText(items[i])
       }
+      if (newestUserText && newestAgentText) break
     }
-    if (turn.status === "completed") this.state = "Done"
+    if (newestUserText) this.lastUserMessage = newestUserText
+    if (newestAgentText) this.setLiveSummary(newestAgentText)
+    if (newestTurn.status === "completed") this.state = "Done"
     else if (this.currentTurnId) this.state = "Working"
     this.refreshState()
   }
@@ -569,9 +587,79 @@ export class RunCodexUI extends BaseScriptComponent {
     this.addText(flex, "SampleDataLabel", SAMPLE_LABEL, 27, 2.2, 52)
     this.addText(flex, "TaskName", TASK_NAME, 27, 2.1, 62)
     this.statusText = this.addText(flex, "TaskStatus", "Working", 27, 2, 61)
-    this.taskDescriptionText = this.addText(flex, "TaskDescription", "Small coding task · Preview sample", 27, 1.7, 43)
-    this.lastUserMessageText = this.addText(flex, "LastUserMessage", "", 27, 2.4, 34).getSceneObject()
-    this.lastUserMessageText.enabled = false
+    this.statusTextObject = this.statusText.getSceneObject()
+    const userMessageRow = global.scene.createSceneObject("UserMessageRow")
+    userMessageRow.setParent(flex.getSceneObject())
+    userMessageRow.enabled = false
+    const userMessageRowLayout = userMessageRow.createComponent(FlexLayout.getTypeName()) as FlexLayout
+    userMessageRowLayout.autoDiscoverItemsOnStart = false
+    userMessageRowLayout.width = 27
+    userMessageRowLayout.height = USER_MESSAGE_BUBBLE_HEIGHT + 0.3
+    userMessageRowLayout.direction = FlexDirection.Row
+    userMessageRowLayout.justifyContent = FlexJustify.End
+    userMessageRowLayout.alignItems = FlexAlign.Center
+    const userMessageRowItem = userMessageRow.createComponent(FlexItem.getTypeName()) as FlexItem
+    userMessageRowItem.overrideWidth = 27
+    userMessageRowItem.overrideHeight = USER_MESSAGE_BUBBLE_HEIGHT + 0.3
+    this.flexRows.push({item: userMessageRowItem, sceneObject: userMessageRow})
+    flex.addItems([userMessageRowItem])
+    this.lastUserMessageRow = userMessageRow
+
+    const userBubble = global.scene.createSceneObject("UserMessageBubble")
+    userBubble.setParent(userMessageRow)
+    userBubble.getTransform().setLocalPosition(new vec3(0, 0, 0.42))
+    this.userMessageViewport = userBubble
+    const userBubbleSurface = userBubble.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    userBubbleSurface.initialize()
+    userBubbleSurface.size = new vec2(22, USER_MESSAGE_BUBBLE_HEIGHT)
+    userBubbleSurface.setBackgroundGradient({
+      enabled: true,
+      type: "Linear",
+      start: new vec2(-1, 1),
+      end: new vec2(1, -1),
+      stop0: {enabled: true, color: new vec4(0.015, 0.22, 0.34, 1), percent: 0},
+      stop1: {enabled: true, color: new vec4(0.02, 0.12, 0.22, 1), percent: 1}
+    })
+    userBubbleSurface.border = true
+    userBubbleSurface.borderType = "Color"
+    userBubbleSurface.borderColor = new vec4(0.12, 0.66, 0.92, 1)
+    userBubbleSurface.borderSize = 0.035
+    userBubbleSurface.opacity = 1
+    const userBubbleTextObject = global.scene.createSceneObject("UserMessageText")
+    userBubbleTextObject.setParent(userBubble)
+    userBubbleTextObject.getTransform().setLocalPosition(new vec3(0, 0, 0.16))
+    this.lastUserMessageText = userBubbleTextObject.createComponent("Component.Text") as Text
+    this.lastUserMessageText.text = ""
+    this.lastUserMessageText.size = 42
+    this.lastUserMessageText.lineSpacing = 1.08
+    this.lastUserMessageText.weight = 500
+    this.lastUserMessageText.depthTest = true
+    this.lastUserMessageText.textFill.color = new vec4(0.94, 0.98, 1, 1)
+    this.lastUserMessageText.horizontalAlignment = HorizontalAlignment.Left
+    this.lastUserMessageText.verticalAlignment = VerticalAlignment.Top
+    this.lastUserMessageText.horizontalOverflow = HorizontalOverflow.Wrap
+    this.lastUserMessageText.verticalOverflow = VerticalOverflow.Truncate
+    this.lastUserMessageText.layoutRect = Rect.create(
+      -10.6,
+      10.6,
+      -USER_MESSAGE_BUBBLE_HEIGHT * 0.5 + 0.8,
+      USER_MESSAGE_BUBBLE_HEIGHT * 0.5 - 1.1
+    )
+    const userBubbleProgressObject = global.scene.createSceneObject("UserMessageProgress")
+    userBubbleProgressObject.setParent(userBubble)
+    userBubbleProgressObject.getTransform().setLocalPosition(new vec3(6.5, USER_MESSAGE_BUBBLE_HEIGHT * 0.5 - 0.45, 0.18))
+    this.userMessageProgressText = userBubbleProgressObject.createComponent("Component.Text") as Text
+    this.userMessageProgressText.text = ""
+    this.userMessageProgressText.size = 19
+    this.userMessageProgressText.depthTest = true
+    this.userMessageProgressText.textFill.color = new vec4(0.42, 0.86, 1, 1)
+    this.userMessageProgressText.horizontalAlignment = HorizontalAlignment.Right
+    this.userMessageProgressText.verticalAlignment = VerticalAlignment.Center
+    this.userMessageProgressText.layoutRect = Rect.create(-3.3, 3.3, -0.35, 0.35)
+    const userBubbleItem = userBubble.createComponent(FlexItem.getTypeName()) as FlexItem
+    userBubbleItem.overrideWidth = 22
+    userBubbleItem.overrideHeight = USER_MESSAGE_BUBBLE_HEIGHT
+    userMessageRowLayout.addItems([userBubbleItem])
 
     this.approvalText = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 7, 48).getSceneObject()
     const approvalButtons = this.createButtonRow(flex, "ApprovalButtonsRow", 27, 5)
@@ -579,10 +667,9 @@ export class RunCodexUI extends BaseScriptComponent {
     this.approveButton = this.addButton(approvalButtons, "ApproveButton", "Approve", 12.8, () => this.approve(), 5)
     this.rejectButton = this.addButton(approvalButtons, "RejectButton", "Reject", 12.8, () => this.reject(), 5)
     this.feedbackText = this.addText(flex, "ApprovalFeedback", "", 27, 2.7, 42).getSceneObject()
-    const summaryHeading = this.createButtonRow(flex, "SummaryHeadingRow", 27, 3.2)
-    this.summaryHeadingRow = summaryHeading.getSceneObject()
-    this.summaryHeadingText = this.addText(summaryHeading, "SummaryHeading", "SUMMARY", 13, 3.2, 35)
-    this.summaryHeadingText.textFill.color = new vec4(0.72, 0.88, 0.98, 1)
+    const summaryMeta = this.createButtonRow(flex, "ConversationProgressRow", 27, 1.4)
+    summaryMeta.justifyContent = FlexJustify.End
+    this.summaryMetaRow = summaryMeta.getSceneObject()
     this.summaryTextComponent = this.addText(flex, "CompletionSummary", "", 27, SUMMARY_VIEWPORT_HEIGHT, 44)
     this.summaryText = this.summaryTextComponent.getSceneObject()
     this.summaryTextComponent.weight = 500
@@ -599,7 +686,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryTextComponent.horizontalOverflow = HorizontalOverflow.Wrap
     this.summaryLines = this.wrapSummaryLines(SUMMARY)
 
-    this.summaryProgressText = this.addText(summaryHeading, "SummaryProgress", "1–7 / 32", 7, 3.2, 24)
+    this.summaryProgressText = this.addText(summaryMeta, "SummaryProgress", "1–7 / 32", 7, 1.4, 24)
     this.summaryProgressText.horizontalAlignment = HorizontalAlignment.Right
     const spacerObject = global.scene.createSceneObject("SummaryToActionsSpacer")
     spacerObject.setParent(flex.getSceneObject())
@@ -767,19 +854,26 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private refreshState(): void {
     this.statusText.text = this.state
+    if (this.state !== "Working") this.resetWorkingBreath()
     this.cue.enabled = this.state === "Needs approval"
     this.approvalText.enabled = this.state === "Needs approval"
     this.approvalButtonRow.enabled = this.state === "Needs approval"
     this.approveButton.enabled = this.state === "Needs approval"
     this.rejectButton.enabled = this.state === "Needs approval"
-    this.feedbackText.enabled = (this.feedbackText.getComponent("Component.Text") as Text).text.length > 0
+    const feedback = this.feedbackText.getComponent("Component.Text") as Text
+    if (this.state !== "Needs approval" && feedback.text === "Review the request, then choose Approve or Reject.") {
+      feedback.text = ""
+    }
+    this.feedbackText.enabled = feedback.text.length > 0
     const showConversation = this.liveMode && (this.composerOpen || this.liveSummary.length > 0 || this.state === "Done")
     const showSummary = this.state === "Done" || showConversation
-    this.summaryHeadingRow.enabled = showSummary
+    this.summaryMetaRow.enabled = showSummary
     this.summaryViewport.enabled = showSummary
     this.summaryText.enabled = showSummary
     this.summaryViewportBackdrop.enabled = showSummary
-    this.lastUserMessageText.enabled = this.liveMode && this.lastUserMessage.length > 0
+    const visibleUserMessage = this.composerOpen ? this.messageDraft : this.lastUserMessage
+    this.lastUserMessageRow.enabled = this.liveMode && visibleUserMessage.length > 0
+    this.updateUserMessageView(visibleUserMessage)
     this.updateSummaryView()
     this.advanceButton.enabled = !this.liveMode && this.state === "Working"
     this.liveActionsRow.enabled = this.liveMode
@@ -798,6 +892,38 @@ export class RunCodexUI extends BaseScriptComponent {
     sendLabel.text = this.pendingSendRpcId !== null ? "Sending…" : "Send"
     const restartLabel = this.restartButton.getComponent(ElementContent.getTypeName()) as ElementContent
     restartLabel.text = this.liveMode ? "Close RunCodex" : "Restart sample"
+  }
+
+  private updateWorkingBreath(): void {
+    if (this.state !== "Working") return
+    // A calm 4.8-second breathing loop: gently expand, then settle back.
+    this.statusBreathElapsed += getDeltaTime()
+    const breath = (Math.sin((this.statusBreathElapsed / 4.8) * Math.PI * 2 - Math.PI / 2) + 1) * 0.5
+    const scale = 0.98 + breath * 0.04
+    const alpha = 0.82 + breath * 0.18
+    // The Flex text object is left-aligned inside a wide row. Its visual
+    // center sits about 7.5 cm left of the transform origin, so counter-shift
+    // the object as it scales to keep the word centered in place.
+    const nextOffsetX = -7.5 * (1 - scale)
+    const currentPosition = this.statusTextObject.getTransform().getLocalPosition()
+    this.statusTextObject.getTransform().setLocalPosition(
+      new vec3(currentPosition.x + nextOffsetX - this.statusBreathOffsetX, currentPosition.y, currentPosition.z)
+    )
+    this.statusBreathOffsetX = nextOffsetX
+    this.statusTextObject.getTransform().setLocalScale(new vec3(scale, scale, 1))
+    this.statusText.textFill.color = new vec4(0.3, 0.88, 1, alpha)
+  }
+
+  private resetWorkingBreath(): void {
+    this.statusBreathElapsed = 0
+    if (!this.statusTextObject) return
+    const currentPosition = this.statusTextObject.getTransform().getLocalPosition()
+    this.statusTextObject.getTransform().setLocalPosition(
+      new vec3(currentPosition.x - this.statusBreathOffsetX, currentPosition.y, currentPosition.z)
+    )
+    this.statusBreathOffsetX = 0
+    this.statusTextObject.getTransform().setLocalScale(new vec3(1, 1, 1))
+    this.statusText.textFill.color = new vec4(0.3, 0.88, 1, 1)
   }
 
   private resizeSurface(): void {
@@ -822,7 +948,7 @@ export class RunCodexUI extends BaseScriptComponent {
   }
 
   private updateSummaryView(): void {
-    const summary = this.composerOpen ? this.messageDraft : this.liveMode ? this.liveSummary : SUMMARY
+    const summary = this.liveMode ? this.liveSummary : SUMMARY
     this.summaryLines = this.wrapSummaryLines(summary)
     if (this.showingFullSummary) {
       const visible = this.summaryLines.slice(this.summaryLineOffset, this.summaryLineOffset + SUMMARY_VISIBLE_LINES)
@@ -835,6 +961,27 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryTextComponent.verticalOverflow = VerticalOverflow.Truncate
     this.summaryTextComponent.horizontalOverflow = HorizontalOverflow.Wrap
     this.updateSummaryProgress()
+  }
+
+  private updateUserMessageView(message: string): void {
+    if (message !== this.displayedUserMessage) {
+      this.displayedUserMessage = message
+      this.userMessageLines = this.wrapSummaryLines(message, USER_MESSAGE_LINE_WIDTH)
+      this.userMessageLineOffset = this.composerOpen
+        ? Math.max(0, this.userMessageLines.length - USER_MESSAGE_VISIBLE_LINES)
+        : 0
+    }
+    const maxOffset = Math.max(0, this.userMessageLines.length - USER_MESSAGE_VISIBLE_LINES)
+    this.userMessageLineOffset = Math.max(0, Math.min(maxOffset, this.userMessageLineOffset))
+    const firstLine = Math.min(this.userMessageLines.length, this.userMessageLineOffset + 1)
+    const visibleLines = this.userMessageLines.slice(
+      this.userMessageLineOffset,
+      this.userMessageLineOffset + USER_MESSAGE_VISIBLE_LINES
+    )
+    this.lastUserMessageText.text = visibleLines.join("\n")
+    this.userMessageProgressText.text = this.userMessageLines.length > USER_MESSAGE_VISIBLE_LINES
+      ? firstLine + "–" + Math.min(this.userMessageLines.length, this.userMessageLineOffset + USER_MESSAGE_VISIBLE_LINES) + " / " + this.userMessageLines.length
+      : ""
   }
 
   private openComposer(): void {
@@ -852,7 +999,6 @@ export class RunCodexUI extends BaseScriptComponent {
     this.finalizedVoiceText = this.messageDraft.trim()
     this.showingFullSummary = true
     this.summaryLineOffset = 0
-    this.findText("SummaryHeading").text = "MESSAGE TO CODEX"
     this.findText("ApprovalFeedback").text = this.liveConnected && this.codexReady && this.liveThreadId
       ? "Tap Speak, say your message, review it, then Send."
       : "Speak your message. The transcript will stay here until Codex reconnects."
@@ -925,7 +1071,6 @@ export class RunCodexUI extends BaseScriptComponent {
   private cancelComposer(): void {
     if (!this.composerOpen) return
     this.composerOpen = false
-    this.findText("SummaryHeading").text = "SUMMARY"
     this.findText("ApprovalFeedback").text = "Draft kept. Tap Speak to record again, or Send to Codex."
     this.showingFullSummary = this.wasShowingFullSummaryBeforeCompose
     if (this.voiceCaptureActive) this.stopVoiceCapture("Draft kept. Tap Speak to continue.")
@@ -964,12 +1109,10 @@ export class RunCodexUI extends BaseScriptComponent {
   }
 
   private updateLiveContentView(): void {
-    if (this.composerOpen) this.findText("SummaryHeading").text = "MESSAGE TO CODEX"
-    else this.findText("SummaryHeading").text = "SUMMARY"
     this.updateSummaryView()
   }
 
-  private wrapSummaryLines(value: string): string[] {
+  private wrapSummaryLines(value: string, lineWidth: number = SUMMARY_LINE_WIDTH): string[] {
     const lines: string[] = []
     const sourceLines = value.replace(/\r/g, "").split("\n")
     let previousWasBlank = true
@@ -1013,7 +1156,7 @@ export class RunCodexUI extends BaseScriptComponent {
       let line = prefix
       for (const word of words) {
         const separator = line.length > 0 && line !== prefix && line !== continuation ? " " : (line === prefix && prefix.length > 0 ? " " : "")
-        if (line.length > 0 && line.length + separator.length + word.length > SUMMARY_LINE_WIDTH) {
+        if (line.length > 0 && line.length + separator.length + word.length > lineWidth) {
           lines.push(line)
           line = continuation + word
         } else {
@@ -1033,13 +1176,24 @@ export class RunCodexUI extends BaseScriptComponent {
   }
 
   private beginHandSwipe(handType: "left" | "right", hand: BaseHand): void {
-    if (!this.showingFullSummary || this.state !== "Done" || !hand.isTracked()) return
+    if (!hand.isTracked()) return
     // Use the pinch center to hit-test the text area; wrist position is the
     // steadier signal for motion once the gesture has started.
     const pinchCenter = hand.indexTip.position.add(hand.thumbTip.position).uniformScale(0.5)
-    if (!this.isPointInSummaryViewport(pinchCenter)) return
-    const local = this.summaryViewport.getTransform().getInvertedWorldTransform().multiplyPoint(hand.wrist.position)
     const swipe = this.handSwipe[handType]
+    if (this.showingFullSummary && this.state === "Done" && this.isPointInSummaryViewport(pinchCenter)) {
+      swipe.target = "summary"
+    } else if (
+      this.lastUserMessageRow.enabled &&
+      this.userMessageLines.length > USER_MESSAGE_VISIBLE_LINES &&
+      this.isPointInUserMessageViewport(pinchCenter)
+    ) {
+      swipe.target = "userMessage"
+    } else {
+      return
+    }
+    const viewport = swipe.target === "summary" ? this.summaryViewport : this.userMessageViewport
+    const local = viewport.getTransform().getInvertedWorldTransform().multiplyPoint(hand.wrist.position)
     swipe.active = true
     swipe.startY = local.y
     swipe.smoothedDelta = 0
@@ -1059,7 +1213,8 @@ export class RunCodexUI extends BaseScriptComponent {
       this.endHandSwipe(handType)
       return
     }
-    const local = this.summaryViewport.getTransform().getInvertedWorldTransform().multiplyPoint(hand.wrist.position)
+    const viewport = swipe.target === "summary" ? this.summaryViewport : this.userMessageViewport
+    const local = viewport.getTransform().getInvertedWorldTransform().multiplyPoint(hand.wrist.position)
     const delta = local.y - swipe.startY
     swipe.smoothedDelta = swipe.smoothedDelta * 0.65 + delta * 0.35
     if (Math.abs(swipe.smoothedDelta) > Math.abs(swipe.maxDelta)) swipe.maxDelta = swipe.smoothedDelta
@@ -1074,13 +1229,26 @@ export class RunCodexUI extends BaseScriptComponent {
     if (getTime() - swipe.startedAt > 0.75) return
     if (Math.abs(swipe.maxDelta) < HAND_SWIPE_THRESHOLD_CM) return
     const lines = Math.max(1, Math.round(Math.abs(swipe.maxDelta) / HAND_SWIPE_THRESHOLD_CM))
-    this.moveSummaryLines(swipe.maxDelta > 0 ? lines : -lines)
+    const delta = swipe.maxDelta > 0 ? lines : -lines
+    if (swipe.target === "summary") this.moveSummaryLines(delta)
+    else this.moveUserMessageLines(delta)
   }
 
   private onPreviewTouchStart(event: TouchStartEvent): void {
-    if (!this.showingFullSummary || this.state !== "Done" || !this.isScreenPointInSummaryViewport(event.getTouchPosition())) return
+    const position = event.getTouchPosition()
+    if (this.showingFullSummary && this.state === "Done" && this.isScreenPointInSummaryViewport(position)) {
+      this.previewTouchTarget = "summary"
+    } else if (
+      this.lastUserMessageRow.enabled &&
+      this.userMessageLines.length > USER_MESSAGE_VISIBLE_LINES &&
+      this.isScreenPointInUserMessageViewport(position)
+    ) {
+      this.previewTouchTarget = "userMessage"
+    } else {
+      return
+    }
     this.previewTouchActive = true
-    this.previewTouchLastY = event.getTouchPosition().y
+    this.previewTouchLastY = position.y
     this.previewTouchRemainder = 0
   }
 
@@ -1095,7 +1263,8 @@ export class RunCodexUI extends BaseScriptComponent {
     this.previewTouchLastY = currentY
     const lineSteps = Math.trunc(this.previewTouchRemainder / PREVIEW_SWIPE_LINE_THRESHOLD)
     if (lineSteps !== 0) {
-      this.moveSummaryLines(lineSteps)
+      if (this.previewTouchTarget === "summary") this.moveSummaryLines(lineSteps)
+      else if (this.previewTouchTarget === "userMessage") this.moveUserMessageLines(lineSteps)
       this.previewTouchRemainder -= lineSteps * PREVIEW_SWIPE_LINE_THRESHOLD
     }
   }
@@ -1104,6 +1273,7 @@ export class RunCodexUI extends BaseScriptComponent {
     if (!this.previewTouchActive) return
     this.applyPreviewTouchPosition(event.getTouchPosition())
     this.previewTouchActive = false
+    this.previewTouchTarget = null
     this.previewTouchRemainder = 0
   }
 
@@ -1125,11 +1295,40 @@ export class RunCodexUI extends BaseScriptComponent {
     return inRect(point.y) || inRect(1 - point.y)
   }
 
+  private isPointInUserMessageViewport(worldPosition: vec3): boolean {
+    const local = this.userMessageViewport.getTransform().getInvertedWorldTransform().multiplyPoint(worldPosition)
+    return Math.abs(local.x) <= 11 && Math.abs(local.y) <= USER_MESSAGE_BUBBLE_HEIGHT * 0.5
+  }
+
+  private isScreenPointInUserMessageViewport(point: vec2): boolean {
+    const world = this.userMessageViewport.getTransform().getWorldTransform()
+    const camera = this.cameraProvider.getComponent()
+    const halfHeight = USER_MESSAGE_BUBBLE_HEIGHT * 0.5
+    const corners = [
+      world.multiplyPoint(new vec3(-11, -halfHeight, 0)),
+      world.multiplyPoint(new vec3(-11, halfHeight, 0)),
+      world.multiplyPoint(new vec3(11, -halfHeight, 0)),
+      world.multiplyPoint(new vec3(11, halfHeight, 0))
+    ].map((corner) => camera.worldSpaceToScreenSpace(corner))
+    const minX = Math.min(...corners.map((p) => p.x))
+    const maxX = Math.max(...corners.map((p) => p.x))
+    const minY = Math.min(...corners.map((p) => p.y))
+    const maxY = Math.max(...corners.map((p) => p.y))
+    const inRect = (y: number): boolean => point.x >= minX && point.x <= maxX && y >= minY && y <= maxY
+    return inRect(point.y) || inRect(1 - point.y)
+  }
+
   private moveSummaryLines(delta: number): void {
     if (!this.showingFullSummary) return
     const maxOffset = Math.max(0, this.summaryLines.length - SUMMARY_VISIBLE_LINES)
     this.summaryLineOffset = Math.max(0, Math.min(maxOffset, this.summaryLineOffset + delta))
     this.updateSummaryView()
+  }
+
+  private moveUserMessageLines(delta: number): void {
+    const maxOffset = Math.max(0, this.userMessageLines.length - USER_MESSAGE_VISIBLE_LINES)
+    this.userMessageLineOffset = Math.max(0, Math.min(maxOffset, this.userMessageLineOffset + delta))
+    this.updateUserMessageView(this.displayedUserMessage)
   }
 
   private layoutRows(): void {

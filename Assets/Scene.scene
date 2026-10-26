@@ -15,7 +15,7 @@
     - !<own> 02ea56fa-496a-4ffa-8c22-f72fb57e2eaf
     - !<own> 2839cacb-9297-4662-973e-25e32c6d79ab
     - !<own> e4916a1a-9e47-405f-b235-db9a7128028b
-    - !<own> 113bfce3-2b28-437e-97c5-c746c08d5be2
+    - !<own> ad8e2006-f8c8-4e8f-b68a-d034fb20f540
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -55,7 +55,7 @@
   RenderOrder: 0
   Size: 20.000000
   Near: 1.000000
-  Far: 10000.000000
+  Far: 100000.000000
   Fov: 63.541019
   ClearColor: !<CameraClearColor>
     Mode: None
@@ -205,7 +205,7 @@
   PrefabRemaps:
     []
   Name: CounterLegBackRight
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: 25.000000, y: -49.000000, z: -126.000000}
@@ -482,21 +482,6 @@
     - !<own> b54dc8b5-dbcf-4fcc-a310-fb436127cc60
   Components:
     []
-- !<SceneObject/113bfce3-2b28-437e-97c5-c746c08d5be2>
-  PrefabRemaps:
-    []
-  Name: LEAF Plugin Bridge
-  Enabled: true
-  Layers: 1
-  LocalTransform: !<TransformEntity>
-    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
-    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
-    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
-    HasSegmentScaleCompensation: false
-  Children:
-    []
-  Components:
-    - !<own> 6d431886-622f-48ae-8c3b-e5ecb8fd7b88
 - !<SceneObject/11ac73c9-b802-4eb6-abf5-f73054ca7e20>
   PrefabRemaps:
     []
@@ -931,6 +916,22 @@
     - !<own> e42bbb9f-e951-4432-be2e-3cc712b1fc33
   Components:
     []
+- !<ScriptComponent/344063ec-076a-47d8-9827-0c317f50989d>
+  PrefabRemaps:
+    []
+  Name: MessagingBridge
+  Enabled: true
+  ScriptAsset: !<reference> 9aa407db-2872-4afc-a162-cf7faf2a0f29
+  ScriptInputsDefault:
+    {}
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      {}
+  ScriptTypes:
+    "":
+      {}
 - !<RenderMeshVisual/35501b69-b651-41e6-9b64-72a252df8105>
   PrefabRemaps:
     []
@@ -1427,7 +1428,7 @@
   PrefabRemaps:
     []
   Name: CoffeeMaker
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: 20.000000, y: -21.000000, z: -94.000000}
@@ -1518,22 +1519,6 @@
     - !<own> 0e778a10-bd57-4a2a-b20a-b6f4326e8058
   Components:
     []
-- !<ScriptComponent/6d431886-622f-48ae-8c3b-e5ecb8fd7b88>
-  PrefabRemaps:
-    []
-  Name: MessagingBridge
-  Enabled: true
-  ScriptAsset: !<reference> 9aa407db-2872-4afc-a162-cf7faf2a0f29
-  ScriptInputsDefault:
-    {}
-  ScriptTypesDefault:
-    {}
-  ScriptInputs:
-    "":
-      {}
-  ScriptTypes:
-    "":
-      {}
 - !<SceneObject/6dbaab8f-d98a-4f36-b836-1d7c8a0cca87>
   PrefabRemaps:
     []
@@ -1643,7 +1628,7 @@
   PrefabRemaps:
     []
   Name: CounterLegFrontRight
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: 25.000000, y: -49.000000, z: -84.000000}
@@ -1967,7 +1952,7 @@
   PrefabRemaps:
     []
   Name: CounterLegBackLeft
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: -25.000000, y: -49.000000, z: -126.000000}
@@ -2043,7 +2028,7 @@
   PrefabRemaps:
     []
   Name: Mug
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: -14.000000, y: -25.000000, z: -94.000000}
@@ -2214,7 +2199,22 @@
     HasSegmentScaleCompensation: false
   Children:
     - !<own> f6687ab7-52ac-408d-a892-8a9559125450
+    []
   Components:
+- !<SceneObject/ad8e2006-f8c8-4e8f-b68a-d034fb20f540>
+  PrefabRemaps:
+    []
+  Name: LEAF Plugin Bridge
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+  Components:
+    - !<own> 344063ec-076a-47d8-9827-0c317f50989d
     []
 - !<SceneObject/b22d97e6-4c06-4135-af29-d26adb2b9d86>
   PrefabRemaps:
@@ -2405,7 +2405,7 @@
   PrefabRemaps:
     []
   Name: CounterLegFrontLeft
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: -25.000000, y: -49.000000, z: -84.000000}
@@ -2498,7 +2498,7 @@
   PrefabRemaps:
     []
   Name: Counter
-  Enabled: true
+  Enabled: false
   Layers: 1
   LocalTransform: !<TransformEntity>
     Position: {x: 0.000000, y: -32.000000, z: -105.000000}
