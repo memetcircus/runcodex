@@ -36,6 +36,8 @@ const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
 const LIVE_CONNECTING_LABEL = "CONNECTING TO CODEX BRIDGE"
 const LIVE_OFFLINE_LABEL = "CODEX BRIDGE OFFLINE"
+const LAUNCHER_CAMERA_OFFSET = new vec3(0, -1, -105)
+const PANEL_CAMERA_OFFSET = new vec3(0, -3, -105)
 
 @component
 export class RunCodexUI extends BaseScriptComponent {
@@ -161,6 +163,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.panel.enabled = false
 
     this.createEvent("UpdateEvent").bind(() => {
+      this.updateHeadLockedPlacement()
       this.updateHandSwipes()
       this.updateWorkingBreath()
     })
@@ -209,6 +212,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryTextComponent.textFill.color = coolWhite
     this.summaryTextComponent.depthTest = true
     this.summaryProgressText.textFill.color = cyan
+    this.updateHeadLockedPlacement()
     if (this.bridgeUrl.trim().length > 0 && this.bridgeToken.trim().length > 0) {
       this.liveMode = true
       this.setConnectionLabel(LIVE_CONNECTING_LABEL)
@@ -1059,6 +1063,18 @@ export class RunCodexUI extends BaseScriptComponent {
     this.statusBreathOffsetX = nextOffsetX
     this.statusTextObject.getTransform().setLocalScale(new vec3(scale, scale, 1))
     this.statusText.textFill.color = new vec4(0.3, 0.88, 1, alpha)
+  }
+
+  private updateHeadLockedPlacement(): void {
+    if (!this.launcher || !this.panel) return
+    const camera = this.cameraProvider.getComponent()
+    if (!camera) return
+
+    // Keep the launcher and open panel at comfortable offsets in the camera's
+    // local space. Their existing Billboards continue to face the user.
+    const cameraWorld = camera.getSceneObject().getTransform().getWorldTransform()
+    this.launcher.getTransform().setWorldPosition(cameraWorld.multiplyPoint(LAUNCHER_CAMERA_OFFSET))
+    this.panel.getTransform().setWorldPosition(cameraWorld.multiplyPoint(PANEL_CAMERA_OFFSET))
   }
 
   private resetWorkingBreath(): void {
