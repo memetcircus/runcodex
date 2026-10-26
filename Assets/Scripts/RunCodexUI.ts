@@ -17,10 +17,14 @@ const SUMMARY = "Updated 8 tests, removed 2 flaky waits, and all checks passed."
 const SUMMARY_VIEWPORT_HEIGHT = 15.5
 const SUMMARY_VISIBLE_LINES = 11
 const SUMMARY_LINE_WIDTH = 52
-const USER_MESSAGE_BUBBLE_HEIGHT = 7.4
+const USER_MESSAGE_MIN_HEIGHT = 2.8
+const USER_MESSAGE_MAX_HEIGHT = 7.2
 const USER_MESSAGE_VISIBLE_LINES = 4
-// The larger chat font needs fewer characters to fill the measured bubble.
+const USER_MESSAGE_HORIZONTAL_PADDING = 1.15
+const USER_MESSAGE_VERTICAL_PADDING = 0.75
 const USER_MESSAGE_LINE_WIDTH = 49
+const APPROVAL_VERTICAL_PADDING = 1.0
+const APPROVAL_ROW_GAP = 0.9
 const HAND_SWIPE_THRESHOLD_CM = 2.5
 const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
@@ -56,6 +60,10 @@ export class RunCodexUI extends BaseScriptComponent {
   private statusBreathElapsed = 0
   private statusBreathOffsetX = 0
   private approvalText!: SceneObject
+  private approvalTextComponent!: Text
+  private approvalTextItem!: FlexItem
+  private approvalTopSpacer: {item: FlexItem, sceneObject: SceneObject} | null = null
+  private approvalBottomSpacer: {item: FlexItem, sceneObject: SceneObject} | null = null
   private summaryText!: SceneObject
   private summaryTextComponent!: Text
   private summaryMetaRow!: SceneObject
@@ -63,8 +71,16 @@ export class RunCodexUI extends BaseScriptComponent {
   private summaryViewportBackdrop!: SceneObject
   private summaryViewportSurface!: RoundedRectangle
   private summaryProgressText!: Text
+  private summaryViewportHeight = SUMMARY_VIEWPORT_HEIGHT
+  private summaryVisibleLineCount = SUMMARY_VISIBLE_LINES
   private userMessageViewport!: SceneObject
   private userMessageProgressText!: Text
+  private userMessageSurface!: RoundedRectangle
+  private userMessageItem!: FlexItem
+  private userMessageRowLayout!: FlexLayout
+  private userMessageVisibleLineCount = USER_MESSAGE_VISIBLE_LINES
+  private userMessageBubbleHeight = USER_MESSAGE_MIN_HEIGHT
+  private userMessageProgressGap = 0
   private approveButton!: SceneObject
   private rejectButton!: SceneObject
   private summaryLines: string[] = []
@@ -81,7 +97,8 @@ export class RunCodexUI extends BaseScriptComponent {
   private previewTouchRemainder = 0
   private showingFullSummary = true
   private advanceButton!: SceneObject
-  private liveActionsRow!: SceneObject
+  private refreshStatusButton!: SceneObject
+  private liveComposeRow!: SceneObject
   private composeButton!: SceneObject
   private sendButton!: SceneObject
   private lastUserMessageRow!: SceneObject
@@ -267,9 +284,7 @@ export class RunCodexUI extends BaseScriptComponent {
       const approvalExplanation = this.findText("ApprovalExplanation")
       approvalExplanation.text = "LIVE CODEX APPROVAL\n" + visibleDetail
       approvalExplanation.size = 48
-      approvalExplanation.layoutRect = Rect.create(-11.5, 11.5, -3.5, 3.5)
-      const approvalExplanationItem = this.approvalText.getComponent(FlexItem.getTypeName()) as FlexItem
-      approvalExplanationItem.overrideHeight = 7
+      approvalExplanation.layoutRect = Rect.create(-11.9, 11.9, -0.75, 0.75)
       this.findText("ApprovalFeedback").text = "Review the request, then choose Approve or Reject."
       this.state = "Needs approval"
       this.refreshState()
@@ -290,6 +305,7 @@ export class RunCodexUI extends BaseScriptComponent {
         if (method === "initialize") {
           this.codexReady = false
           this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+          this.refreshState()
         }
         if (method === "thread/list") this.setConnectionLabel("NO TASK IN THIS PROJECT")
         if ((method === "turn/start" || method === "turn/steer") && this.pendingSendRpcId === Number(message.id)) {
@@ -309,7 +325,9 @@ export class RunCodexUI extends BaseScriptComponent {
       } else if (method === "thread/list") {
         const threads = message.result?.data || []
         if (threads.length === 0) {
+          this.liveThreadId = ""
           this.setConnectionLabel("NO TASK IN THIS PROJECT")
+          this.refreshState()
           return
         }
         // Prefer an approval that is already waiting in this project. The
@@ -372,7 +390,7 @@ export class RunCodexUI extends BaseScriptComponent {
       this.liveSummary += params.delta || ""
       this.summaryLines = this.wrapSummaryLines(this.liveSummary)
       this.showingFullSummary = true
-      this.summaryLineOffset = Math.max(0, this.summaryLines.length - SUMMARY_VISIBLE_LINES)
+      this.summaryLineOffset = Math.max(0, this.summaryLines.length - this.summaryVisibleLineCount)
       this.updateSummaryView()
       this.refreshState()
     } else if (message.method === "item/completed" && params.item?.type === "agentMessage") {
@@ -569,7 +587,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryViewportBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.45))
     this.summaryViewportSurface = this.summaryViewportBackdrop.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
     this.summaryViewportSurface.initialize()
-    this.summaryViewportSurface.size = new vec2(27, SUMMARY_VIEWPORT_HEIGHT)
+    this.summaryViewportSurface.size = new vec2(27, this.summaryViewportHeight)
     this.summaryViewportSurface.setBackgroundGradient({
       enabled: true,
       type: "Linear",
@@ -584,7 +602,9 @@ export class RunCodexUI extends BaseScriptComponent {
     this.summaryViewportSurface.borderSize = 0.045
     this.summaryViewportSurface.opacity = 1
 
-    this.addText(flex, "SampleDataLabel", SAMPLE_LABEL, 27, 2.2, 52)
+    const panelHeader = this.createButtonRow(flex, "PanelHeaderRow", 27, 5)
+    this.addText(panelHeader, "SampleDataLabel", SAMPLE_LABEL, 22, 4.5, 39)
+    this.refreshStatusButton = this.addButton(panelHeader, "RefreshCodexStatusButton", "↻", 4.4, () => this.advance(), 4.4, 68)
     this.addText(flex, "TaskName", TASK_NAME, 27, 2.1, 62)
     this.statusText = this.addText(flex, "TaskStatus", "Working", 27, 2, 61)
     this.statusTextObject = this.statusText.getSceneObject()
@@ -594,13 +614,13 @@ export class RunCodexUI extends BaseScriptComponent {
     const userMessageRowLayout = userMessageRow.createComponent(FlexLayout.getTypeName()) as FlexLayout
     userMessageRowLayout.autoDiscoverItemsOnStart = false
     userMessageRowLayout.width = 27
-    userMessageRowLayout.height = USER_MESSAGE_BUBBLE_HEIGHT + 0.3
+    userMessageRowLayout.height = USER_MESSAGE_MIN_HEIGHT + 0.3
     userMessageRowLayout.direction = FlexDirection.Row
     userMessageRowLayout.justifyContent = FlexJustify.End
     userMessageRowLayout.alignItems = FlexAlign.Center
     const userMessageRowItem = userMessageRow.createComponent(FlexItem.getTypeName()) as FlexItem
     userMessageRowItem.overrideWidth = 27
-    userMessageRowItem.overrideHeight = USER_MESSAGE_BUBBLE_HEIGHT + 0.3
+    userMessageRowItem.overrideHeight = USER_MESSAGE_MIN_HEIGHT + 0.3
     this.flexRows.push({item: userMessageRowItem, sceneObject: userMessageRow})
     flex.addItems([userMessageRowItem])
     this.lastUserMessageRow = userMessageRow
@@ -611,7 +631,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.userMessageViewport = userBubble
     const userBubbleSurface = userBubble.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
     userBubbleSurface.initialize()
-    userBubbleSurface.size = new vec2(22, USER_MESSAGE_BUBBLE_HEIGHT)
+    userBubbleSurface.size = new vec2(22, USER_MESSAGE_MIN_HEIGHT)
     userBubbleSurface.setBackgroundGradient({
       enabled: true,
       type: "Linear",
@@ -639,15 +659,10 @@ export class RunCodexUI extends BaseScriptComponent {
     this.lastUserMessageText.verticalAlignment = VerticalAlignment.Top
     this.lastUserMessageText.horizontalOverflow = HorizontalOverflow.Wrap
     this.lastUserMessageText.verticalOverflow = VerticalOverflow.Truncate
-    this.lastUserMessageText.layoutRect = Rect.create(
-      -10.6,
-      10.6,
-      -USER_MESSAGE_BUBBLE_HEIGHT * 0.5 + 0.8,
-      USER_MESSAGE_BUBBLE_HEIGHT * 0.5 - 1.1
-    )
+    this.lastUserMessageText.layoutRect = Rect.create(-9.85, 9.85, -0.65, 0.65)
     const userBubbleProgressObject = global.scene.createSceneObject("UserMessageProgress")
     userBubbleProgressObject.setParent(userBubble)
-    userBubbleProgressObject.getTransform().setLocalPosition(new vec3(6.5, USER_MESSAGE_BUBBLE_HEIGHT * 0.5 - 0.45, 0.18))
+    userBubbleProgressObject.getTransform().setLocalPosition(new vec3(6.5, USER_MESSAGE_MIN_HEIGHT * 0.5 - 0.35, 0.18))
     this.userMessageProgressText = userBubbleProgressObject.createComponent("Component.Text") as Text
     this.userMessageProgressText.text = ""
     this.userMessageProgressText.size = 19
@@ -658,10 +673,28 @@ export class RunCodexUI extends BaseScriptComponent {
     this.userMessageProgressText.layoutRect = Rect.create(-3.3, 3.3, -0.35, 0.35)
     const userBubbleItem = userBubble.createComponent(FlexItem.getTypeName()) as FlexItem
     userBubbleItem.overrideWidth = 22
-    userBubbleItem.overrideHeight = USER_MESSAGE_BUBBLE_HEIGHT
+    userBubbleItem.overrideHeight = USER_MESSAGE_MIN_HEIGHT
     userMessageRowLayout.addItems([userBubbleItem])
 
-    this.approvalText = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 7, 48).getSceneObject()
+    this.userMessageSurface = userBubbleSurface
+    this.userMessageItem = userBubbleItem
+    this.userMessageRowLayout = userMessageRowLayout
+
+    const approvalTopSpacerObject = global.scene.createSceneObject("ApprovalConversationGap")
+    approvalTopSpacerObject.setParent(flex.getSceneObject())
+    approvalTopSpacerObject.enabled = false
+    const approvalTopSpacerItem = approvalTopSpacerObject.createComponent(FlexItem.getTypeName()) as FlexItem
+    approvalTopSpacerItem.overrideWidth = 27
+    approvalTopSpacerItem.overrideHeight = APPROVAL_ROW_GAP
+    this.approvalTopSpacer = {item: approvalTopSpacerItem, sceneObject: approvalTopSpacerObject}
+    this.flexRows.push(this.approvalTopSpacer)
+
+    this.approvalTextComponent = this.addText(flex, "ApprovalExplanation", "Codex needs permission to update the project configuration.", 27, 3.5, 48)
+    this.approvalText = this.approvalTextComponent.getSceneObject()
+    this.approvalTextItem = this.approvalText.getComponent(FlexItem.getTypeName()) as FlexItem
+    this.approvalTextComponent.verticalAlignment = VerticalAlignment.Top
+    this.approvalTextComponent.layoutRect = Rect.create(-11.9, 11.9, -0.75, 0.75)
+    this.approvalBottomSpacer = this.createFlexSpacer(flex, "ApprovalActionsGap", APPROVAL_ROW_GAP)
     const approvalButtons = this.createButtonRow(flex, "ApprovalButtonsRow", 27, 5)
     this.approvalButtonRow = approvalButtons.getSceneObject()
     this.approveButton = this.addButton(approvalButtons, "ApproveButton", "Approve", 12.8, () => this.approve(), 5)
@@ -696,21 +729,20 @@ export class RunCodexUI extends BaseScriptComponent {
     spacerItem.overrideHeight = 0
     this.actionGroupSpacer = {item: spacerItem, sceneObject: spacerObject}
     this.flexRows.push(this.actionGroupSpacer)
-    const liveActions = this.createButtonRow(flex, "LiveActionsRow", 27, 5)
-    this.liveActionsRow = liveActions.getSceneObject()
-    this.addButton(liveActions, "RefreshCodexStatusButton", "Refresh Codex status", 13.2, () => this.advance(), 5, 28)
-    this.composeButton = this.addButton(liveActions, "ComposeMessageButton", "Speak", 6.5, () => this.openComposer(), 5, 32)
-    this.sendButton = this.addButton(liveActions, "SendMessageButton", "Send", 6.5, () => this.sendLiveMessage(), 5, 34)
+    const liveCompose = this.createButtonRow(flex, "LiveConversationActionsRow", 27, 5)
+    this.liveComposeRow = liveCompose.getSceneObject()
+    this.composeButton = this.addButton(liveCompose, "ComposeMessageButton", "Speak", 12.8, () => this.openComposer(), 5, 32)
+    this.sendButton = this.addButton(liveCompose, "SendMessageButton", "Send", 12.8, () => this.sendLiveMessage(), 5, 34)
     this.advanceButton = this.addButton(flex, "AdvanceSampleButton", "Advance sample task", 27, () => this.advance(), 5)
     const refreshSpacerObject = global.scene.createSceneObject("RefreshToActionsSpacer")
     refreshSpacerObject.setParent(flex.getSceneObject())
     refreshSpacerObject.enabled = false
     const refreshSpacerItem = refreshSpacerObject.createComponent(FlexItem.getTypeName()) as FlexItem
     refreshSpacerItem.overrideWidth = 29
-    refreshSpacerItem.overrideHeight = 2.2
+    refreshSpacerItem.overrideHeight = 0.65
     this.refreshToActionsSpacer = {item: refreshSpacerItem, sceneObject: refreshSpacerObject}
     this.flexRows.push(this.refreshToActionsSpacer)
-    const actions = this.createButtonRow(flex, "PanelActionsRow", 27, 7)
+    const actions = this.createButtonRow(flex, "PanelActionsRow", 27, 5)
     this.actionsRow = actions.getSceneObject()
     this.closeButton = this.addButton(actions, "ClosePanelButton", "Close panel", 12.8, () => this.closePanel(), 5)
     this.restartButton = this.addButton(actions, "RestartSampleButton", "Restart sample", 12.8, () => {
@@ -853,34 +885,39 @@ export class RunCodexUI extends BaseScriptComponent {
   }
 
   private refreshState(): void {
+    const liveSessionUsable = this.liveMode && this.liveConnected && this.codexReady && this.liveThreadId.length > 0
     this.statusText.text = this.state
     if (this.state !== "Working") this.resetWorkingBreath()
-    this.cue.enabled = this.state === "Needs approval"
-    this.approvalText.enabled = this.state === "Needs approval"
-    this.approvalButtonRow.enabled = this.state === "Needs approval"
-    this.approveButton.enabled = this.state === "Needs approval"
-    this.rejectButton.enabled = this.state === "Needs approval"
+    const approvalVisible = this.state === "Needs approval" && (!this.liveMode || (liveSessionUsable && this.liveApprovalId !== null))
+    this.cue.enabled = approvalVisible
+    this.approvalText.enabled = approvalVisible
+    this.approvalButtonRow.enabled = approvalVisible
+    this.approveButton.enabled = approvalVisible
+    this.rejectButton.enabled = approvalVisible
     const feedback = this.feedbackText.getComponent("Component.Text") as Text
     if (this.state !== "Needs approval" && feedback.text === "Review the request, then choose Approve or Reject.") {
       feedback.text = ""
     }
-    this.feedbackText.enabled = feedback.text.length > 0
-    const showConversation = this.liveMode && (this.composerOpen || this.liveSummary.length > 0 || this.state === "Done")
-    const showSummary = this.state === "Done" || showConversation
+    this.feedbackText.enabled = feedback.text.length > 0 && (!this.liveMode || liveSessionUsable)
+    const showConversation = liveSessionUsable && (this.composerOpen || this.liveSummary.length > 0 || this.state === "Done")
+    const showSummary = this.liveMode ? showConversation : this.state === "Done"
     this.summaryMetaRow.enabled = showSummary
     this.summaryViewport.enabled = showSummary
     this.summaryText.enabled = showSummary
     this.summaryViewportBackdrop.enabled = showSummary
     const visibleUserMessage = this.composerOpen ? this.messageDraft : this.lastUserMessage
-    this.lastUserMessageRow.enabled = this.liveMode && visibleUserMessage.length > 0
+    this.lastUserMessageRow.enabled = liveSessionUsable && visibleUserMessage.length > 0
     this.updateUserMessageView(visibleUserMessage)
     this.updateSummaryView()
     this.advanceButton.enabled = !this.liveMode && this.state === "Working"
-    this.liveActionsRow.enabled = this.liveMode
+    this.refreshStatusButton.enabled = this.liveMode
+    this.liveComposeRow.enabled = liveSessionUsable
+    this.findObject("TaskName").enabled = !this.liveMode || liveSessionUsable
+    this.findObject("TaskStatus").enabled = !this.liveMode || liveSessionUsable
     const composeButton = this.composeButton.getComponent(Button.getTypeName()) as Button
-    composeButton.inactive = this.pendingSendRpcId !== null
+    composeButton.inactive = !liveSessionUsable || this.pendingSendRpcId !== null
     const sendButton = this.sendButton.getComponent(Button.getTypeName()) as Button
-    sendButton.inactive = !this.liveConnected || !this.codexReady || !this.liveThreadId || this.pendingSendRpcId !== null || this.messageDraft.trim().length === 0
+    sendButton.inactive = !liveSessionUsable || this.pendingSendRpcId !== null || this.messageDraft.trim().length === 0
     this.closeButton.enabled = true
     this.restartButton.enabled = true
     this.actionsRow.enabled = true
@@ -943,7 +980,7 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private updateSummaryProgress(): void {
     const firstLine = Math.min(this.summaryLines.length, this.summaryLineOffset + 1)
-    const lastLine = Math.min(this.summaryLines.length, this.summaryLineOffset + SUMMARY_VISIBLE_LINES)
+    const lastLine = Math.min(this.summaryLines.length, this.summaryLineOffset + this.summaryVisibleLineCount)
     this.summaryProgressText.text = firstLine + "–" + lastLine + " / " + this.summaryLines.length
   }
 
@@ -951,7 +988,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const summary = this.liveMode ? this.liveSummary : SUMMARY
     this.summaryLines = this.wrapSummaryLines(summary)
     if (this.showingFullSummary) {
-      const visible = this.summaryLines.slice(this.summaryLineOffset, this.summaryLineOffset + SUMMARY_VISIBLE_LINES)
+      const visible = this.summaryLines.slice(this.summaryLineOffset, this.summaryLineOffset + this.summaryVisibleLineCount)
       this.summaryTextComponent.text = visible.join("\n")
     } else {
       const conciseLines = this.wrapSummaryLines(summary.slice(0, 110))
@@ -968,20 +1005,44 @@ export class RunCodexUI extends BaseScriptComponent {
       this.displayedUserMessage = message
       this.userMessageLines = this.wrapSummaryLines(message, USER_MESSAGE_LINE_WIDTH)
       this.userMessageLineOffset = this.composerOpen
-        ? Math.max(0, this.userMessageLines.length - USER_MESSAGE_VISIBLE_LINES)
+        ? Math.max(0, this.userMessageLines.length - this.userMessageVisibleLineCount)
         : 0
     }
-    const maxOffset = Math.max(0, this.userMessageLines.length - USER_MESSAGE_VISIBLE_LINES)
+    const lineHeight = this.textLineHeight(this.lastUserMessageText)
+    const visibleWithoutProgress = Math.max(1, Math.floor((USER_MESSAGE_MAX_HEIGHT - USER_MESSAGE_VERTICAL_PADDING * 2) / lineHeight))
+    this.userMessageProgressGap = this.userMessageLines.length > visibleWithoutProgress ? 0.55 : 0
+    const maxVisibleLines = Math.max(1, Math.floor((USER_MESSAGE_MAX_HEIGHT - USER_MESSAGE_VERTICAL_PADDING * 2 - this.userMessageProgressGap) / lineHeight))
+    this.userMessageVisibleLineCount = Math.min(maxVisibleLines, Math.max(1, this.userMessageLines.length))
+    this.userMessageBubbleHeight = Math.max(USER_MESSAGE_MIN_HEIGHT, Math.min(
+      USER_MESSAGE_MAX_HEIGHT,
+      this.userMessageVisibleLineCount * lineHeight + USER_MESSAGE_VERTICAL_PADDING * 2 + this.userMessageProgressGap
+    ))
+    this.userMessageSurface.size = new vec2(22, this.userMessageBubbleHeight)
+    this.userMessageItem.overrideHeight = this.userMessageBubbleHeight
+    this.userMessageRowLayout.height = this.userMessageBubbleHeight + 0.3
+    const rowItem = this.lastUserMessageRow.getComponent(FlexItem.getTypeName()) as FlexItem
+    rowItem.overrideHeight = this.userMessageBubbleHeight + 0.3
+    this.lastUserMessageText.layoutRect = Rect.create(
+      -11 + USER_MESSAGE_HORIZONTAL_PADDING,
+      11 - USER_MESSAGE_HORIZONTAL_PADDING,
+      -this.userMessageBubbleHeight * 0.5 + USER_MESSAGE_VERTICAL_PADDING,
+      this.userMessageBubbleHeight * 0.5 - USER_MESSAGE_VERTICAL_PADDING - this.userMessageProgressGap
+    )
+    this.userMessageProgressText.getSceneObject().getTransform().setLocalPosition(
+      new vec3(6.5, this.userMessageBubbleHeight * 0.5 - 0.35, 0.18)
+    )
+    const maxOffset = Math.max(0, this.userMessageLines.length - this.userMessageVisibleLineCount)
     this.userMessageLineOffset = Math.max(0, Math.min(maxOffset, this.userMessageLineOffset))
     const firstLine = Math.min(this.userMessageLines.length, this.userMessageLineOffset + 1)
     const visibleLines = this.userMessageLines.slice(
       this.userMessageLineOffset,
-      this.userMessageLineOffset + USER_MESSAGE_VISIBLE_LINES
+      this.userMessageLineOffset + this.userMessageVisibleLineCount
     )
     this.lastUserMessageText.text = visibleLines.join("\n")
-    this.userMessageProgressText.text = this.userMessageLines.length > USER_MESSAGE_VISIBLE_LINES
-      ? firstLine + "–" + Math.min(this.userMessageLines.length, this.userMessageLineOffset + USER_MESSAGE_VISIBLE_LINES) + " / " + this.userMessageLines.length
+    this.userMessageProgressText.text = this.userMessageLines.length > this.userMessageVisibleLineCount
+      ? firstLine + "–" + Math.min(this.userMessageLines.length, this.userMessageLineOffset + this.userMessageVisibleLineCount) + " / " + this.userMessageLines.length
       : ""
+    this.updateApprovalLayout()
   }
 
   private openComposer(): void {
@@ -1156,11 +1217,12 @@ export class RunCodexUI extends BaseScriptComponent {
       let line = prefix
       for (const word of words) {
         const separator = line.length > 0 && line !== prefix && line !== continuation ? " " : (line === prefix && prefix.length > 0 ? " " : "")
-        if (line.length > 0 && line.length + separator.length + word.length > lineWidth) {
+        const candidate = line + separator + word
+        if (line.length > 0 && this.measureWrappedText(candidate, lineWidth) > this.wrapWidth(lineWidth)) {
           lines.push(line)
           line = continuation + word
         } else {
-          line += separator + word
+          line = candidate
         }
       }
       if (line.length > 0) lines.push(line)
@@ -1170,9 +1232,103 @@ export class RunCodexUI extends BaseScriptComponent {
     return lines
   }
 
+  private wrapWidth(lineWidth: number): number {
+    return lineWidth === USER_MESSAGE_LINE_WIDTH ? 19.7 : 24.2
+  }
+
+  private measureWrappedText(value: string, lineWidth: number): number {
+    const component = lineWidth === USER_MESSAGE_LINE_WIDTH ? this.lastUserMessageText : this.summaryTextComponent
+    if (!component) return value.length * 0.5
+    // Estimate the rendered advance from glyph classes and the active font
+    // size. This follows the actual content width/font scale without raw
+    // character-count wrapping or rate-limited per-word Text measurements.
+    const em = component.size / 43.886
+    let advance = 0
+    for (const character of value) {
+      if (/\s/.test(character)) advance += 0.29
+      else if (/[ilI|!.,:;'`]/.test(character)) advance += 0.27
+      else if (/[MW@#%&]/.test(character)) advance += 0.82
+      else if (/[A-Z0-9]/.test(character)) advance += 0.61
+      else if (/[()[\]{}<>?*]/.test(character)) advance += 0.38
+      else advance += 0.52
+    }
+    return advance * em
+  }
+
+  private textLineHeight(component: Text): number {
+    return Math.max(0.6, (component.size / 43.886) * (component.lineSpacing || 1.08))
+  }
+
+  private updateApprovalLayout(): void {
+    if (!this.approvalTextComponent || !this.approvalTextItem) return
+    const approvalText = this.approvalTextComponent.text
+    const lines = this.wrapTextToWidth(approvalText, this.approvalTextComponent, 23.8)
+    this.approvalTextComponent.text = lines.join("\n")
+    const height = Math.max(3.1, lines.length * this.textLineHeight(this.approvalTextComponent) + APPROVAL_VERTICAL_PADDING * 2)
+    this.approvalTextItem.overrideHeight = height
+    this.approvalTextComponent.layoutRect = Rect.create(
+      -11.9,
+      11.9,
+      -height * 0.5 + APPROVAL_VERTICAL_PADDING,
+      height * 0.5 - APPROVAL_VERTICAL_PADDING
+    )
+    if (this.approvalTopSpacer) {
+      const showGap = this.state === "Needs approval" && this.lastUserMessageRow.enabled
+      this.approvalTopSpacer.sceneObject.enabled = showGap
+      this.approvalTopSpacer.item.overrideHeight = showGap ? APPROVAL_ROW_GAP : 0
+    }
+    if (this.approvalBottomSpacer) {
+      this.approvalBottomSpacer.sceneObject.enabled = this.state === "Needs approval"
+      this.approvalBottomSpacer.item.overrideHeight = APPROVAL_ROW_GAP
+    }
+  }
+
+  private wrapTextToWidth(value: string, component: Text, width: number): string[] {
+    const lines: string[] = []
+    for (const sourceLine of value.replace(/\r/g, "").split("\n")) {
+      if (!sourceLine.trim()) { lines.push(""); continue }
+      let line = ""
+      for (const word of sourceLine.split(/\s+/)) {
+        const candidate = line ? line + " " + word : word
+        if (line && this.measureComponentText(candidate, component) > width) {
+          lines.push(line)
+          line = word
+        } else line = candidate
+      }
+      if (line) lines.push(line)
+    }
+    return lines
+  }
+
+  private measureComponentText(value: string, component: Text): number {
+    const em = component.size / 43.886
+    let advance = 0
+    for (const character of value) {
+      if (/\s/.test(character)) advance += 0.29
+      else if (/[ilI|!.,:;'`]/.test(character)) advance += 0.27
+      else if (/[MW@#%&]/.test(character)) advance += 0.82
+      else if (/[A-Z0-9]/.test(character)) advance += 0.61
+      else if (/[()[\]{}<>?*]/.test(character)) advance += 0.38
+      else advance += 0.52
+    }
+    return advance * em
+  }
+
+  private createFlexSpacer(layout: FlexLayout, name: string, height: number): {item: FlexItem, sceneObject: SceneObject} {
+    const sceneObject = global.scene.createSceneObject(name)
+    sceneObject.setParent(layout.getSceneObject())
+    sceneObject.enabled = false
+    const item = sceneObject.createComponent(FlexItem.getTypeName()) as FlexItem
+    item.overrideWidth = 27
+    item.overrideHeight = height
+    this.flexRows.push({item, sceneObject})
+    layout.addItems([item])
+    return {item, sceneObject}
+  }
+
   private isPointInSummaryViewport(worldPosition: vec3): boolean {
     const local = this.summaryViewport.getTransform().getInvertedWorldTransform().multiplyPoint(worldPosition)
-    return Math.abs(local.x) <= 13.5 && Math.abs(local.y) <= SUMMARY_VIEWPORT_HEIGHT * 0.5
+    return Math.abs(local.x) <= 13.5 && Math.abs(local.y) <= this.summaryViewportHeight * 0.5
   }
 
   private beginHandSwipe(handType: "left" | "right", hand: BaseHand): void {
@@ -1185,7 +1341,7 @@ export class RunCodexUI extends BaseScriptComponent {
       swipe.target = "summary"
     } else if (
       this.lastUserMessageRow.enabled &&
-      this.userMessageLines.length > USER_MESSAGE_VISIBLE_LINES &&
+      this.userMessageLines.length > this.userMessageVisibleLineCount &&
       this.isPointInUserMessageViewport(pinchCenter)
     ) {
       swipe.target = "userMessage"
@@ -1240,7 +1396,7 @@ export class RunCodexUI extends BaseScriptComponent {
       this.previewTouchTarget = "summary"
     } else if (
       this.lastUserMessageRow.enabled &&
-      this.userMessageLines.length > USER_MESSAGE_VISIBLE_LINES &&
+      this.userMessageLines.length > this.userMessageVisibleLineCount &&
       this.isScreenPointInUserMessageViewport(position)
     ) {
       this.previewTouchTarget = "userMessage"
@@ -1282,10 +1438,10 @@ export class RunCodexUI extends BaseScriptComponent {
     const world = transform.getWorldTransform()
     const camera = this.cameraProvider.getComponent()
     const corners = [
-      world.multiplyPoint(new vec3(-13.5, -SUMMARY_VIEWPORT_HEIGHT * 0.5, 0)),
-      world.multiplyPoint(new vec3(-13.5, SUMMARY_VIEWPORT_HEIGHT * 0.5, 0)),
-      world.multiplyPoint(new vec3(13.5, -SUMMARY_VIEWPORT_HEIGHT * 0.5, 0)),
-      world.multiplyPoint(new vec3(13.5, SUMMARY_VIEWPORT_HEIGHT * 0.5, 0))
+      world.multiplyPoint(new vec3(-13.5, -this.summaryViewportHeight * 0.5, 0)),
+      world.multiplyPoint(new vec3(-13.5, this.summaryViewportHeight * 0.5, 0)),
+      world.multiplyPoint(new vec3(13.5, -this.summaryViewportHeight * 0.5, 0)),
+      world.multiplyPoint(new vec3(13.5, this.summaryViewportHeight * 0.5, 0))
     ].map((corner) => camera.worldSpaceToScreenSpace(corner))
     const minX = Math.min(...corners.map((p) => p.x))
     const maxX = Math.max(...corners.map((p) => p.x))
@@ -1297,13 +1453,13 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private isPointInUserMessageViewport(worldPosition: vec3): boolean {
     const local = this.userMessageViewport.getTransform().getInvertedWorldTransform().multiplyPoint(worldPosition)
-    return Math.abs(local.x) <= 11 && Math.abs(local.y) <= USER_MESSAGE_BUBBLE_HEIGHT * 0.5
+    return Math.abs(local.x) <= 11 && Math.abs(local.y) <= this.userMessageBubbleHeight * 0.5
   }
 
   private isScreenPointInUserMessageViewport(point: vec2): boolean {
     const world = this.userMessageViewport.getTransform().getWorldTransform()
     const camera = this.cameraProvider.getComponent()
-    const halfHeight = USER_MESSAGE_BUBBLE_HEIGHT * 0.5
+    const halfHeight = this.userMessageBubbleHeight * 0.5
     const corners = [
       world.multiplyPoint(new vec3(-11, -halfHeight, 0)),
       world.multiplyPoint(new vec3(-11, halfHeight, 0)),
@@ -1320,13 +1476,13 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private moveSummaryLines(delta: number): void {
     if (!this.showingFullSummary) return
-    const maxOffset = Math.max(0, this.summaryLines.length - SUMMARY_VISIBLE_LINES)
+    const maxOffset = Math.max(0, this.summaryLines.length - this.summaryVisibleLineCount)
     this.summaryLineOffset = Math.max(0, Math.min(maxOffset, this.summaryLineOffset + delta))
     this.updateSummaryView()
   }
 
   private moveUserMessageLines(delta: number): void {
-    const maxOffset = Math.max(0, this.userMessageLines.length - USER_MESSAGE_VISIBLE_LINES)
+    const maxOffset = Math.max(0, this.userMessageLines.length - this.userMessageVisibleLineCount)
     this.userMessageLineOffset = Math.max(0, Math.min(maxOffset, this.userMessageLineOffset + delta))
     this.updateUserMessageView(this.displayedUserMessage)
   }
@@ -1344,8 +1500,30 @@ export class RunCodexUI extends BaseScriptComponent {
     if (this.refreshToActionsSpacer) {
       this.refreshToActionsSpacer.sceneObject.enabled = this.state === "Done"
     }
+    const activeRows = this.flexRows.filter(row => row.sceneObject.enabled)
+    const summaryItem = this.summaryText.getComponent(FlexItem.getTypeName()) as FlexItem
+    const summaryVisible = this.summaryText.enabled
+    if (summaryVisible) {
+      const otherHeight = activeRows
+        .filter(row => row.item !== summaryItem)
+        .reduce((sum, row) => sum + row.item.overrideHeight, 0)
+      const gaps = Math.max(0, activeRows.length - 1) * this.contentFlex.rowGap
+      const available = this.contentFlex.height - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - gaps
+      this.summaryViewportHeight = Math.max(4.5, Math.min(SUMMARY_VIEWPORT_HEIGHT, available))
+      summaryItem.overrideHeight = this.summaryViewportHeight
+      this.summaryTextComponent.layoutRect = Rect.create(
+        -13.5 + 1.4,
+        13.5 - 1.4,
+        -this.summaryViewportHeight * 0.5 + 1.1,
+        this.summaryViewportHeight * 0.5 - 1.1
+      )
+      this.summaryViewportSurface.size = new vec2(27, this.summaryViewportHeight)
+      this.summaryVisibleLineCount = Math.max(1, Math.floor((this.summaryViewportHeight - 2.2) / this.textLineHeight(this.summaryTextComponent)))
+      this.summaryLineOffset = Math.max(0, Math.min(this.summaryLineOffset, this.summaryLines.length - this.summaryVisibleLineCount))
+      this.updateSummaryView()
+    }
     this.contentFlex.clearItems()
-    this.contentFlex.addItems(this.flexRows.filter(row => row.sceneObject.enabled).map(row => row.item))
+    this.contentFlex.addItems(activeRows.map(row => row.item))
   }
 
   private findText(name: string): Text {

@@ -11,6 +11,9 @@ const host = process.env.RUNCODEX_BRIDGE_HOST ?? '0.0.0.0'
 const port = Number(process.env.RUNCODEX_BRIDGE_PORT ?? 8765)
 const token = process.env.RUNCODEX_BRIDGE_TOKEN ?? randomBytes(24).toString('base64url')
 const allowedMethods = new Set(['initialize', 'initialized', 'thread/list', 'thread/turns/list', 'thread/resume', 'turn/start', 'turn/steer'])
+// Codex app-server can include large recent-turn payloads. Keep a firm cap,
+// but allow those frames through so the local relay does not drop its client.
+const MAX_WEBSOCKET_FRAME_BYTES = 32 * 1024 * 1024
 const allowedThreadIds = new Set()
 const pendingApprovals = new Set()
 const pendingApprovalMessages = new Map()
@@ -263,7 +266,9 @@ function parseFrames(buffer, isMasked, onMessage, onPong) {
     } else if (length === 127) {
       if (buffer.length - offset < 10) break
       const longLength = buffer.readBigUInt64BE(offset + 2)
-      if (longLength > 1_000_000n) throw new Error('WebSocket frame exceeds the 1 MB limit')
+      if (longLength > BigInt(MAX_WEBSOCKET_FRAME_BYTES)) {
+        throw new Error(`WebSocket frame exceeds the ${MAX_WEBSOCKET_FRAME_BYTES / (1024 * 1024)} MB limit`)
+      }
       length = Number(longLength)
       headerLength = 10
     }
