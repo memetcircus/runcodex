@@ -21,7 +21,6 @@ const SAMPLE_LABEL = "SAMPLE DATA — NOT CONNECTED TO CODEX"
 const TASK_NAME = "Refactor coffee ordering tests"
 const SUMMARY = "Updated 8 tests, removed 2 flaky waits, and all checks passed."
 const SUMMARY_VIEWPORT_HEIGHT = 15.5
-const SUMMARY_MIN_VIEWPORT_HEIGHT = 7.5
 const SUMMARY_VIEWPORT_WIDTH = 25.6
 const SUMMARY_HORIZONTAL_PADDING = 4.5
 const SUMMARY_VERTICAL_PADDING = 4.5
@@ -46,6 +45,8 @@ const APPROVAL_HINT_HEIGHT = 1.35
 const APPROVAL_BUTTON_HEIGHT = 5
 const APPROVAL_MAX_VISIBLE_LINES = 16
 const APPROVAL_TEXT_LINE_HEIGHT_MULTIPLIER = 1.45
+const APPROVAL_SUMMARY_MIN_HEIGHT = 1.5
+const APPROVAL_SUMMARY_ACTION_GAP = 0.75
 const HAND_SWIPE_THRESHOLD_CM = 2.5
 const PREVIEW_SWIPE_LINE_THRESHOLD = 0.018
 const LIVE_CONNECTED_LABEL = "LIVE CODEX · CONNECTED"
@@ -1221,9 +1222,11 @@ export class RunCodexUI extends BaseScriptComponent {
     const visibleUserMessage = this.composerOpen ? this.messageDraft : this.lastUserMessage
     this.lastUserMessageRow.enabled = liveSessionUsable && visibleUserMessage.length > 0
     if (this.conversationTopSpacer) {
-      this.conversationTopSpacer.sceneObject.enabled = this.lastUserMessageRow.enabled
+      // Keep the conversation compact while the approval card is present so
+      // the card, summary viewport, and action rows all remain inside the panel.
+      this.conversationTopSpacer.sceneObject.enabled = this.lastUserMessageRow.enabled && !approvalVisible
     }
-    this.updateUserMessageView(visibleUserMessage)
+    this.updateUserMessageView(visibleUserMessage, approvalVisible ? 3.1 : USER_MESSAGE_MAX_HEIGHT)
     this.updateSummaryView()
     this.advanceButton.enabled = !this.liveMode && this.state === "Working"
     this.refreshStatusButton.enabled = this.liveMode && this.liveConnected && this.codexReady
@@ -1339,7 +1342,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.updateSummaryProgress()
   }
 
-  private updateUserMessageView(message: string): void {
+  private updateUserMessageView(message: string, maxBubbleHeight: number = USER_MESSAGE_MAX_HEIGHT): void {
     if (message !== this.displayedUserMessage) {
       this.displayedUserMessage = message
       this.userMessageLines = this.wrapSummaryLines(message, true)
@@ -1351,15 +1354,16 @@ export class RunCodexUI extends BaseScriptComponent {
     // Reserve the same comfortable leading used by the approval card so the
     // final wrapped line does not get truncated inside the bubble.
     const lineHeight = this.textLineHeight(this.lastUserMessageText) * USER_MESSAGE_LINE_HEIGHT_MULTIPLIER
-    const visibleWithoutProgress = Math.max(1, Math.floor((USER_MESSAGE_MAX_HEIGHT - USER_MESSAGE_VERTICAL_PADDING * 2) / lineHeight))
+    const heightLimit = Math.max(USER_MESSAGE_MIN_HEIGHT, Math.min(USER_MESSAGE_MAX_HEIGHT, maxBubbleHeight))
+    const visibleWithoutProgress = Math.max(1, Math.floor((heightLimit - USER_MESSAGE_VERTICAL_PADDING * 2) / lineHeight))
     this.userMessageProgressGap = this.userMessageLines.length > visibleWithoutProgress ? 0.55 : 0
     const maxVisibleLines = Math.max(1, Math.min(
       USER_MESSAGE_VISIBLE_LINES,
-      Math.floor((USER_MESSAGE_MAX_HEIGHT - USER_MESSAGE_VERTICAL_PADDING * 2 - this.userMessageProgressGap) / lineHeight)
+      Math.floor((heightLimit - USER_MESSAGE_VERTICAL_PADDING * 2 - this.userMessageProgressGap) / lineHeight)
     ))
     this.userMessageVisibleLineCount = Math.min(maxVisibleLines, Math.max(1, this.userMessageLines.length))
     this.userMessageBubbleHeight = Math.max(USER_MESSAGE_MIN_HEIGHT, Math.min(
-      USER_MESSAGE_MAX_HEIGHT,
+      heightLimit,
       this.userMessageVisibleLineCount * lineHeight + USER_MESSAGE_VERTICAL_PADDING * 2 + this.userMessageProgressGap
     ))
     this.userMessageSurface.size = new vec2(22, this.userMessageBubbleHeight)
@@ -1939,37 +1943,51 @@ export class RunCodexUI extends BaseScriptComponent {
   private moveUserMessageLines(delta: number): void {
     const maxOffset = Math.max(0, this.userMessageLines.length - this.userMessageVisibleLineCount)
     this.userMessageLineOffset = Math.max(0, Math.min(maxOffset, this.userMessageLineOffset + delta))
-    this.updateUserMessageView(this.displayedUserMessage)
+    this.updateUserMessageView(
+      this.displayedUserMessage,
+      this.approvalCard.enabled ? 3.1 : USER_MESSAGE_MAX_HEIGHT
+    )
   }
 
   private layoutRows(): void {
     if (this.actionGroupSpacer) {
-      this.actionGroupSpacer.sceneObject.enabled = this.state === "Done"
-      if (this.state === "Done") {
-        const fixedRows = this.flexRows.filter(row => row !== this.actionGroupSpacer && row.sceneObject.enabled)
-        // Preserve the existing summary-to-refresh gap while the taller
-        // bottom action row spends some of the panel's unused lower space.
-        this.actionGroupSpacer.item.overrideHeight = fixedRows.length > 0 ? 1.7 : 0
-      }
+      const doneLayout = this.state === "Done"
+      const approvalLayout = this.approvalCard.enabled
+      const summaryActionGap = this.summaryText.enabled && this.liveComposeRow.enabled
+      this.actionGroupSpacer.sceneObject.enabled = doneLayout || approvalLayout || summaryActionGap
+      const fixedRows = this.flexRows.filter(row => row !== this.actionGroupSpacer && row.sceneObject.enabled)
+      // Keep the established Done spacing. During approval, reserve a smaller
+      // but visible gap between the summary and the Speak/Send controls. Keep
+      // that same breathing room for any visible live conversation summary.
+      this.actionGroupSpacer.item.overrideHeight = fixedRows.length > 0
+        ? (doneLayout ? 1.7 : approvalLayout || summaryActionGap ? APPROVAL_SUMMARY_ACTION_GAP : 0)
+        : 0
     }
     if (this.refreshToActionsSpacer) {
       this.refreshToActionsSpacer.sceneObject.enabled = this.state === "Done"
     }
-    const activeRows = this.flexRows.filter(row => row.sceneObject.enabled)
     const summaryItem = this.summaryText.getComponent(FlexItem.getTypeName()) as FlexItem
     const summaryVisible = this.summaryText.enabled
+    if (summaryVisible && this.approvalCard.enabled) {
+      // Give the approval card its minimum summary reservation first. This
+      // lets its own wrapped-text scroller calculate a real height budget
+      // instead of using the previous, larger summary viewport.
+      this.summaryViewportHeight = APPROVAL_SUMMARY_MIN_HEIGHT
+      summaryItem.overrideHeight = this.summaryViewportHeight
+    }
+    this.updateApprovalLayout()
+    const activeRows = this.flexRows.filter(row => row.sceneObject.enabled)
     if (summaryVisible) {
       const otherHeight = activeRows
         .filter(row => row.item !== summaryItem)
         .reduce((sum, row) => sum + row.item.overrideHeight, 0)
       const gaps = Math.max(0, activeRows.length - 1) * this.contentFlex.rowGap
       const available = PANEL_MAX_CONTENT_HEIGHT - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - gaps
-      const minimumSummaryHeight = this.approvalCard.enabled || this.state === "Done"
-        ? 4.5
-        : SUMMARY_MIN_VIEWPORT_HEIGHT
-      this.summaryViewportHeight = Math.max(minimumSummaryHeight, Math.min(SUMMARY_VIEWPORT_HEIGHT, available))
+      // Never force the summary to a minimum that exceeds the panel's actual
+      // remaining budget; that was the source of the overlap behind actions.
+      this.summaryViewportHeight = Math.max(0, Math.min(SUMMARY_VIEWPORT_HEIGHT, available))
       this.summaryVerticalPadding = Math.max(
-        0.8,
+        0,
         Math.min(SUMMARY_VERTICAL_PADDING, this.summaryViewportHeight * 0.2)
       )
       summaryItem.overrideHeight = this.summaryViewportHeight
