@@ -96,12 +96,17 @@ Preview interaction and ASR support can differ from the physical glasses. This r
 ## Planning and implementation
 
 - [`devpost/design-brief.md`](devpost/design-brief.md) — approved AR design brief.
+- [`devpost/scope.md`](devpost/scope.md) — retrospective product scope.
+- [`devpost/prd.md`](devpost/prd.md) — retrospective user stories and acceptance criteria.
+- [`devpost/spec.md`](devpost/spec.md) — retrospective architecture and technical design.
+- [`devpost/checklist.md`](devpost/checklist.md) — retrospective build checklist and verification limits.
+- [`devpost/build-notes.md`](devpost/build-notes.md) — implementation and verification summary.
 - [`devpost/two-way-codex-plan.md`](devpost/two-way-codex-plan.md) — conversation integration audit, plan, and verification notes.
 - [`Assets/Scripts/RunCodexUI.ts`](Assets/Scripts/RunCodexUI.ts) — Lens interface, interaction, conversation, and approval handling.
 - [`Assets/RunCodexBridge/bridge.mjs`](Assets/RunCodexBridge/bridge.mjs) — development-only local relay.
 - [`project_notes.md`](project_notes.md) — local bridge troubleshooting notes.
 
-The Lens was planned with the Devpost Learn skill pack and built in Lens Studio using the CLAD workflow and Lens Studio MCP. The repository includes LEAF scenario scripts for Preview workflows; consult their current source before relying on them, because some scenarios may need updates as the interface evolves.
+The project was built in Lens Studio using the CLAD workflow and Lens Studio MCP. The design brief and implementation plan record the project planning; the scope, PRD, spec, checklist, and build notes linked above were reconstructed retrospectively from the current project. The repository includes LEAF scenario scripts for Preview workflows; consult their current source before relying on them, because some scenarios may need updates as the interface evolves.
 
 ## Status and limitations
 
