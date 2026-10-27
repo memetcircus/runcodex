@@ -98,7 +98,7 @@ These are future product ideas, not implemented features:
 
 ## Verification Note
 
-The participant reports that the Lens runs in Lens Studio Preview with SPECS 27 selected, and that live message sending/receiving and real approval requests handled with Approve/Reject work there. Physical Specs device behavior is not verified by that Preview result.
+The participant reports that the full RunCodex experience works in Lens Studio Preview with SPECS 27 selected, including live message sending/receiving and real approval requests handled with Approve/Reject. Physical Specs device behavior is not verified by that Preview result.
 
 ## Submission Proof Points
 

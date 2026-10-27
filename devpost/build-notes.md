@@ -25,8 +25,8 @@ RunCodex is a Specs Lens Studio project with a spatial launcher and conversation
 
 - TypeScript compilation and Lens Studio Preview refresh/log checks are recorded in the project implementation notes.
 - The launcher appeared in Preview in the recorded pass.
-- Participant-confirmed in Lens Studio Preview: live Codex messages can be sent and received, and a real approval request can be handled using Approve/Reject.
-- The Preview result does not verify physical Specs hand interaction, on-device ASR, comfort, or placement.
+- The participant reports trying the full RunCodex experience successfully in Lens Studio Preview with SPECS 27 selected, including live Codex message sending/receiving and real approval handling with Approve/Reject.
+- That Preview result does not verify physical Specs hand interaction, on-device ASR, comfort, or placement.
 - These notes distinguish Preview verification from physical-device verification.
 
 ## Submission Follow-up

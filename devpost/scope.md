@@ -52,7 +52,7 @@ Following a coding task and responding to its approval requests currently pulls 
 
 ## Demo Path
 
-In Lens Studio Preview, open the launcher, show the conversation panel, and demonstrate the composer and message layout. Live Codex message sending/receiving and real approval handling with Approve/Reject have been exercised successfully in Preview, based on the participant's report. Explain the local bridge flow. Identify sample content as sample-only and do not present it as live functionality.
+In Lens Studio Preview with SPECS 27 selected, open the launcher, show the conversation panel, and demonstrate the composer, message layout, live Codex messaging, and approval handling. The participant reports that the full RunCodex experience works in this Preview setup. Explain the local bridge flow. Identify sample content as sample-only and do not present it as live functionality.
 
 ## Submission Story
 

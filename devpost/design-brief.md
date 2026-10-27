@@ -55,7 +55,7 @@ Check these in Lens Studio Preview where the required bridge and Specs input sim
 ## Risks and open questions
 - The local Codex bridge depends on the paired Mac's Codex App Server being available; the bridge is not a public or always-on service.
 - Physical-device speech recognition, hand tracking, long-term comfort, and placement comfort are not verified by Preview testing.
-- The participant reports successful Lens Studio Preview runs with SPECS 27 selected, including live Codex message sending/receiving and a real approval request handled with Approve/Reject. This does not verify physical Specs device behavior.
+- The participant reports that the full RunCodex experience works in Lens Studio Preview with SPECS 27 selected, including live Codex message sending/receiving and a real approval request handled with Approve/Reject. This does not verify physical Specs device behavior.
 
 ## Build notes for CLAD
 - Build for the Specs glasses platform. The current project manifest uses the `Spectacles` target-platform enum, and the participant reports successful Preview runs with SPECS 27 selected; physical-device verification is not claimed.

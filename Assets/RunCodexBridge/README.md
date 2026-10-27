@@ -43,8 +43,8 @@ The bridge's default Codex socket path is an implementation detail. If it does n
 
 - WebSocket traffic is unencrypted. Use a trusted private network only. Do not port-forward the bridge or expose it to the public internet.
 - The bridge is designed for one paired Lens client. It validates the client address and pairing token, restricts thread access to the configured project root, and limits forwarded methods and text size.
-- The App Server socket location and lifecycle are not a stable public integration surface. Confirm that the bridge is connected to the intended local App Server before sending a message or answering an approval.
-- Preview is not a substitute for physical SPECS testing. This repository has not been tested on a physical device.
+- The App Server socket location and lifecycle are not a stable public integration surface. The participant-confirmed SPECS 27 Preview run exercised the configured connection successfully; when using another host, configure and confirm that host's intended local App Server socket.
+- The participant reports that RunCodex was exercised successfully in Lens Studio Preview with SPECS 27 selected, including live message exchange and real approval handling. Physical Specs device behavior has not been verified.
 
 ## Troubleshooting
 
@@ -58,4 +58,4 @@ The relay is running but has not completed the local App Server socket handshake
 
 ### Voice input is unavailable
 
-Check the Preview/device ASR support, microphone permission, account availability, and network access. RunCodex keeps the draft when transcription fails. A physical Specs device has not been used to verify this project.
+Check the Preview/device ASR support, microphone permission, account availability, and network access. RunCodex keeps the draft when transcription fails. SPECS 27 Preview use has been exercised; physical Specs device behavior has not been verified.

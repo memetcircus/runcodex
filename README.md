@@ -106,11 +106,11 @@ User-confirmed in Lens Studio Preview: live Codex message sending and receiving,
 - [`Assets/RunCodexBridge/bridge.mjs`](Assets/RunCodexBridge/bridge.mjs) — development-only local relay.
 - [`project_notes.md`](project_notes.md) — local bridge troubleshooting notes.
 
-The project was built in Lens Studio using the CLAD workflow and Lens Studio MCP. The design brief and implementation plan record the project planning; the scope, PRD, spec, checklist, and build notes linked above were reconstructed retrospectively from the current project. The repository includes LEAF scenario scripts for Preview workflows; consult their current source before relying on them, because some scenarios may need updates as the interface evolves.
+The project was built in Lens Studio using the CLAD workflow and Lens Studio MCP. The design brief and implementation plan record the project planning; the scope, PRD, spec, checklist, and build notes linked above were reconstructed retrospectively from the current project. The repository includes LEAF scenario scripts for Preview workflows. The participant reports that the full RunCodex experience was exercised successfully in Lens Studio Preview with SPECS 27 selected.
 
 ## Status and limitations
 
 - TypeScript compilation and Lens Studio Preview refresh have passed in the current development checkout.
-- User-confirmed in Lens Studio Preview: sending and receiving live Codex messages, and handling a real approval request with **Approve** or **Reject**.
+- User-confirmed in Lens Studio Preview with SPECS 27 selected: the RunCodex experience works, including sending and receiving live Codex messages and handling a real approval request with **Approve** or **Reject**.
 - Live use still depends on a correctly paired local Codex App Server and private-network bridge setup.
 - The project targets the `Spectacles` platform enum in Lens Studio 5.23.2 and has been tested in Preview with **SPECS 27** selected. Physical Specs device behavior remains unverified.

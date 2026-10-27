@@ -1,6 +1,6 @@
 # Build Checklist
 
-> Retrospective checklist reconstructed on 2026-10-27 from the current repository and implementation notes. Checked items mean the implementation/documentation is present in the repository; see each verification field for test limits. This is not a claim that every check was run during the original build.
+> Retrospective checklist reconstructed on 2026-10-27 from the current repository and implementation notes. The participant reports that the full RunCodex experience was tried successfully in Lens Studio Preview with SPECS 27 selected. Physical-device behavior is not covered by that Preview run; this checklist is not a claim that the documents preceded implementation.
 
 ## Build Preferences
 
@@ -28,19 +28,19 @@
   Spec ref: `spec.md > Components And Responsibilities > RunCodex Lens UI`
   What to build: Create the launcher, world-locked panel, conversation viewport, status, close, and move/recenter controls.
   Acceptance: The interface supports the documented open, close, and reposition workflow.
-  Verify: Review `Assets/Scripts/RunCodexUI.ts` and the scene. The participant's current Preview confirmation specifically covers live conversation and approval flows; it does not assert physical-device behavior.
+  Verify: The participant reports that the full spatial interface and its interactions work in SPECS 27 Preview. Physical Specs device behavior is not covered.
 
 - [x] **4. Add reviewed Specs speech input**
   Spec ref: `spec.md > Components And Responsibilities > RunCodex Lens UI`
   What to build: Add Speak/Stop transcription, a visible draft, and explicit Send.
   Acceptance: The user can review dictated text before it is sent; disconnected/pending-send states are handled.
-  Verify: Review the ASR/composer implementation; physical-device ASR is unverified.
+  Verify: The participant reports that the voice/composer flow works in SPECS 27 Preview. Physical-device ASR is not covered by that test.
 
 - [x] **5. Implement the local bridge boundary**
   Spec ref: `spec.md > Components And Responsibilities > RunCodex bridge`
   What to build: Authenticate the paired client, scope threads to the configured project, allow only supported calls, and filter forwarded content.
   Acceptance: The bridge remains a local relay and does not expose arbitrary shell or tool output.
-  Verify: Review `Assets/RunCodexBridge/bridge.mjs` and its README; verify the socket path in the actual environment.
+  Verify: The participant reports the configured bridge/App Server connection worked in SPECS 27 Preview. When using a different host, configure and confirm that host's local socket path.
 
 - [x] **6. Connect thread selection and user turns**
   Spec ref: `spec.md > Data Flow`

@@ -91,7 +91,7 @@ Implements: `prd.md > Epic 5` and the transport portions of Epics 2-4.
 Implements: conversation and execution behavior used by `prd.md > Epics 2-4`.
 
 - Owns threads, turns, tool execution, streamed events, and approval state.
-- Is reached by the bridge through a local socket whose path must be verified in the actual environment.
+- Is reached through the configured local socket; the participant reports that the SPECS 27 Preview connection worked. Other host environments need their own valid socket configuration.
 
 ## External APIs And Dependencies
 
@@ -111,7 +111,7 @@ Codex App Server performs the coding task and invokes its configured tools under
 - The local pairing token and bridge URL are sensitive local configuration; keep them out of tracked scene changes, docs, logs, and screenshots.
 - The bridge's WebSocket transport is unencrypted; use a trusted private network and do not port-forward it.
 - A compatible App Server socket must be available to the bridge; do not guess the socket path.
-- The participant reports successful live message send/receive and real approval Approve/Reject flows in Lens Studio Preview. This does not verify physical Specs device behavior, including on-device ASR, hand interaction, comfort, or placement.
+- The participant reports that the full RunCodex experience works in Lens Studio Preview with SPECS 27 selected, including live message send/receive and real approval Approve/Reject flows. This does not verify physical Specs device behavior, including on-device ASR, hand interaction, comfort, or placement.
 - The manifest and live editor setting identify the project platform enum as `Spectacles` under Lens Studio 5.23.2. The participant reports that the Lens runs successfully in Preview with SPECS 27 selected; this does not establish physical-device behavior.
 - Before device deployment, confirm the intended target device and SDK setup in the current Lens Studio project and Snap documentation.
 
