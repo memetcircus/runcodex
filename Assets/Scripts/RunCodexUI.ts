@@ -446,6 +446,16 @@ export class RunCodexUI extends BaseScriptComponent {
       if (turnStatus === "completed") this.state = "Done"
       else this.state = "Working"
       this.refreshState()
+    } else if (
+      (message.method === "item/started" || message.method === "item/completed") &&
+      params.item?.type === "userMessage"
+    ) {
+      const userText = this.messageText(params.item)
+      if (userText) {
+        this.lastUserMessage = userText
+        this.userMessageLineOffset = 0
+        this.refreshState()
+      }
     } else if (message.method === "item/agentMessage/delta") {
       this.liveSummary += params.delta || ""
       this.summaryLines = this.wrapSummaryLines(this.liveSummary)

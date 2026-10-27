@@ -24,7 +24,7 @@ let codexReady = false
 let codexBuffer = Buffer.alloc(0)
 const allowedNotifications = new Set([
   'thread/started', 'thread/name/updated', 'turn/started', 'turn/completed',
-  'item/agentMessage/delta', 'item/completed', 'serverRequest/resolved',
+  'item/started', 'item/agentMessage/delta', 'item/completed', 'serverRequest/resolved',
 ])
 
 function safeEqual(a, b) {
@@ -235,7 +235,14 @@ function handleCodexMessage(message) {
     }
     if (threadId && !allowedThreadIds.has(threadId)) return
     if (!allowedNotifications.has(message.method)) return
-    if (message.method === 'item/completed') {
+    if (message.method === 'item/started') {
+      if (message.params?.item?.type !== 'userMessage') return
+      const item = message.params.item
+      message.params = {...message.params, item: {
+        type: item.type,
+        text: String(item.text ?? item.content?.map?.((part) => part.text ?? '').join('\n') ?? '').slice(0, 4000),
+      }}
+    } else if (message.method === 'item/completed') {
       if (!['agentMessage', 'userMessage'].includes(message.params?.item?.type)) return
       const item = message.params.item
       message.params = {...message.params, item: {
