@@ -23,12 +23,27 @@ RunCodex Lens  <── local WebSocket ──>  RunCodex bridge  <── local s
 
 The bridge runs on the paired Mac. It is a development relay, not a hosted service or an unrestricted shell. It supports one paired Lens client, filters available threads to the configured project root, allows a limited set of Codex App Server methods, and forwards plain-text conversation content rather than tool output.
 
+### Components and data flow
+
+- **RunCodex Lens** — the SPECS interface in Lens Studio. It owns the launcher, spatial panel, task status, conversation view, speech-to-text draft, and approval controls. The user reviews dictated text before sending it.
+- **RunCodex bridge** — a small Node.js relay on the paired Mac. It authenticates the Lens with a local pairing token, exposes only the supported App Server methods, and keeps thread discovery scoped to `RUNCODEX_PROJECT_ROOT`.
+- **Codex App Server** — the local Codex service reached by the bridge over its Unix-domain socket. It owns the thread, turn, tool execution, and approval state.
+
+The live flow is:
+
+1. The Lens pairs with the bridge, asks for the project's threads, and loads the selected thread's recent user and assistant messages.
+2. The user dictates a follow-up, reviews the draft, and sends it. The Lens uses `turn/start` for a new turn or `turn/steer` to add to the active turn.
+3. The App Server streams turn status and assistant text through the bridge. The bridge forwards bounded plain-text messages; the Lens updates the conversation as events arrive.
+4. If the App Server requests approval, the bridge forwards that request to the Lens. **Approve** or **Reject** returns the decision for that request to the App Server, and the panel updates when it is resolved.
+
+The bridge is a relay, not the agent runtime: it does not execute arbitrary commands, expose tool output, or host project data. Codex App Server remains responsible for running the task and applying its own approval and execution policies.
+
 The bridge uses unencrypted WebSocket on a trusted local network. **Do not port-forward it or expose it to the public internet.** Keep the pairing token private and never put it in this README, screenshots, logs, or a public commit.
 
 ## Open the project
 
 1. Install Lens Studio and Node.js on the Mac used for development.
-2. Open [`Specs Base Template 2.esproj`](Specs%20Base%20Template%202.esproj) in Lens Studio.
+2. Open [`Specs Base Template 2.esproj`](Specs%20Base%20Template%202.esproj) in Lens Studio. This is the current manifest filename; the Lens/product is named **RunCodex**.
 3. Run the project in Lens Studio Preview. Without local bridge credentials, the Lens stays in sample mode and labels its content **SAMPLE DATA — NOT CONNECTED TO CODEX**.
 
 The project file currently records Lens Studio **5.23.2** and the **Spectacles** target. SPECS 27 migration and physical-device behavior have not been verified in this repository; check the project configuration and Snap's current migration guide before targeting a different SDK version.
