@@ -17,8 +17,29 @@ RunCodex does not include a custom virtual keyboard. Speech input availability d
 
 ## How the connection works
 
-```text
-RunCodex Lens  <── local WebSocket ──>  RunCodex bridge  <── local socket ──>  Codex App Server
+```mermaid
+flowchart LR
+    user([User])
+
+    subgraph specs[ SPECS glasses · Lens Studio ]
+        voice[Speak / Stop<br/>ASR dictation]
+        review[Review transcript<br/>then Send]
+        lens[RunCodex Lens<br/>conversation · status · approvals]
+        voice --> review --> lens
+    end
+
+    subgraph mac[ Paired Mac · local development ]
+        bridge[RunCodex bridge<br/>pairing token · method allowlist<br/>project-scoped threads · text filtering]
+        app[Codex App Server<br/>threads · turns · tools<br/>approval state]
+        bridge -->|local Unix-domain socket · requests| app
+        app -->|local Unix-domain socket · events| bridge
+    end
+
+    user --> voice
+    lens -->|private LAN · WebSocket · turn and approval requests| bridge
+    bridge -->|private LAN · WebSocket · filtered live events| lens
+    app -->|status · messages · approval request| bridge
+    bridge -->|approval response| app
 ```
 
 The bridge runs on the paired Mac. It is a development relay, not a hosted service or an unrestricted shell. It supports one paired Lens client, filters available threads to the configured project root, allows a limited set of Codex App Server methods, and forwards plain-text conversation content rather than tool output.
