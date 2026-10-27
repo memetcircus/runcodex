@@ -29,6 +29,8 @@ const SUMMARY_LINE_HEIGHT_ESTIMATE_SCALE = 0.7
 // Lens Text, so this ratio lets prose use the actual padded viewport width.
 const SUMMARY_WRAP_ESTIMATE_SCALE = 0.78
 const PANEL_MAX_CONTENT_HEIGHT = 38
+const APPROVAL_PANEL_MAX_CONTENT_HEIGHT = 52
+const APPROVAL_DRAG_HANDLE_CLEARANCE = 6
 const SUMMARY_VISIBLE_LINES = 11
 const USER_MESSAGE_MIN_HEIGHT = 2.8
 const USER_MESSAGE_MAX_HEIGHT = 7.2
@@ -166,6 +168,7 @@ export class RunCodexUI extends BaseScriptComponent {
   private voiceCaptureActive = false
   private asrModule: AsrModule | null = null
   private surface!: RoundedRectangle
+  private interactionPlane!: InteractionPlane
   private opaqueBackdrop!: SceneObject
   private liveMode = false
   private liveConnected = false
@@ -618,9 +621,9 @@ export class RunCodexUI extends BaseScriptComponent {
     this.panel = global.scene.createSceneObject("RunCodexStatusPanel")
     this.panel.setParent(this.placementRoot)
     this.panel.createComponent("Component.Canvas")
-    const interactionPlane = this.panel.createComponent(InteractionPlane.getTypeName()) as InteractionPlane
-    interactionPlane.planeSize = new vec2(28, 40)
-    interactionPlane.targetingVisual = 0
+    this.interactionPlane = this.panel.createComponent(InteractionPlane.getTypeName()) as InteractionPlane
+    this.interactionPlane.planeSize = new vec2(28, 40)
+    this.interactionPlane.targetingVisual = 0
     this.opaqueBackdrop = this.findObject("RunCodexOpaqueBackdrop")
     this.opaqueBackdrop.setParent(this.panel)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
@@ -1307,10 +1310,23 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private resizeSurface(): void {
     const width = 28
-    const height = Math.min(PANEL_MAX_CONTENT_HEIGHT + 2, Math.max(18, this.contentFlex.height + 2))
+    const approvalClearance = this.approvalCard.enabled ? APPROVAL_DRAG_HANDLE_CLEARANCE : 0
+    const height = Math.min(
+      this.panelContentHeightLimit() + 2 + approvalClearance,
+      Math.max(18, this.contentFlex.height + 2 + approvalClearance)
+    )
     this.surface.size = new vec2(width, height)
+    this.interactionPlane.planeSize = new vec2(width, height)
     this.opaqueBackdrop.getTransform().setLocalPosition(new vec3(0, 0, 0.05))
     this.opaqueBackdrop.getTransform().setLocalScale(new vec3(width, height, 1))
+    const dragHandleY = this.approvalCard.enabled ? -height * 0.5 + 1.5 : -21.5
+    this.dragHandle.getTransform().setLocalPosition(new vec3(0, dragHandleY, 0.35))
+  }
+
+  private panelContentHeightLimit(): number {
+    return this.approvalCard && this.approvalCard.enabled
+      ? APPROVAL_PANEL_MAX_CONTENT_HEIGHT
+      : PANEL_MAX_CONTENT_HEIGHT
   }
 
   private positionSummaryViewportBackdrop(): void {
@@ -1655,7 +1671,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const otherRows = this.flexRows.filter(row => row.sceneObject.enabled && row.item !== this.approvalCardItem)
     const otherHeight = otherRows.reduce((sum, row) => sum + row.item.overrideHeight, 0)
     const cardGapCount = this.approvalCard.enabled ? otherRows.length : 0
-    const availableCardHeight = Math.max(8, PANEL_MAX_CONTENT_HEIGHT - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - cardGapCount * this.contentFlex.rowGap)
+    const availableCardHeight = Math.max(8, this.panelContentHeightLimit() - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - cardGapCount * this.contentFlex.rowGap)
     const shortFixedHeight = APPROVAL_CARD_PADDING * 2 + APPROVAL_TITLE_HEIGHT + APPROVAL_BUTTON_HEIGHT + APPROVAL_HINT_HEIGHT + APPROVAL_CARD_GAP * 3
     const scrollFixedHeight = shortFixedHeight + 1 + APPROVAL_CARD_GAP
     const scrollCapacity = Math.max(1, Math.floor((availableCardHeight - scrollFixedHeight) / lineHeight))
@@ -1982,7 +1998,7 @@ export class RunCodexUI extends BaseScriptComponent {
         .filter(row => row.item !== summaryItem)
         .reduce((sum, row) => sum + row.item.overrideHeight, 0)
       const gaps = Math.max(0, activeRows.length - 1) * this.contentFlex.rowGap
-      const available = PANEL_MAX_CONTENT_HEIGHT - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - gaps
+      const available = this.panelContentHeightLimit() - this.contentFlex.paddingTop - this.contentFlex.paddingBottom - otherHeight - gaps
       // Never force the summary to a minimum that exceeds the panel's actual
       // remaining budget; that was the source of the overlap behind actions.
       this.summaryViewportHeight = Math.max(0, Math.min(SUMMARY_VIEWPORT_HEIGHT, available))
@@ -2009,7 +2025,7 @@ export class RunCodexUI extends BaseScriptComponent {
       + Math.max(0, activeRows.length - 1) * this.contentFlex.rowGap
       + this.contentFlex.paddingTop
       + this.contentFlex.paddingBottom
-    this.contentFlex.height = Math.min(PANEL_MAX_CONTENT_HEIGHT, Math.max(17, usedHeight))
+    this.contentFlex.height = Math.min(this.panelContentHeightLimit(), Math.max(17, usedHeight))
     this.contentFlex.clearItems()
     this.contentFlex.addItems(activeRows.map(row => row.item))
   }
