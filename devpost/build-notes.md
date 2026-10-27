@@ -4,7 +4,7 @@
 
 ## Build Summary
 
-RunCodex is a SPECS Lens Studio project with a spatial launcher and conversation panel. The Lens UI is implemented in TypeScript. A small Node.js bridge runs locally on a paired Mac and relays supported data between the Lens and the Codex App Server.
+RunCodex is a Specs Lens Studio project with a spatial launcher and conversation panel. The current editor setting and manifest use `targetPlatform: Spectacles` in Lens Studio 5.23.2. The participant reports successful Lens Studio Preview runs with SPECS 27 selected. The Preview target is separate from the manifest's platform enum. The Lens UI is implemented in TypeScript. A small Node.js bridge runs locally on a paired Mac and relays supported data between the Lens and the Codex App Server.
 
 ## Tooling And Planning
 
@@ -25,9 +25,9 @@ RunCodex is a SPECS Lens Studio project with a spatial launcher and conversation
 
 - TypeScript compilation and Lens Studio Preview refresh/log checks are recorded in the project implementation notes.
 - The launcher appeared in Preview in the recorded pass.
-- A Preview interaction could not open the panel because a Collider obstructed the interaction target; therefore open-panel and move/recenter visuals were not verified in that pass.
-- A fresh live message/approval round trip, physical SPECS hand interaction, ASR, comfort, and placement have not been verified on physical hardware.
-- These notes distinguish implementation presence from end-to-end runtime verification.
+- Participant-confirmed in Lens Studio Preview: live Codex messages can be sent and received, and a real approval request can be handled using Approve/Reject.
+- The Preview result does not verify physical Specs hand interaction, on-device ASR, comfort, or placement.
+- These notes distinguish Preview verification from physical-device verification.
 
 ## Submission Follow-up
 

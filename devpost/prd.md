@@ -4,7 +4,7 @@
 
 ## Product Summary
 
-RunCodex is a SPECS Lens Studio experience for following a Codex task from a spatial work area. A local Node.js bridge relays bounded text, status, and approval events between one Lens client and the Codex App Server on a paired Mac. The Lens supports a clearly labeled sample mode when it is disconnected.
+RunCodex is a Specs Lens Studio experience for following a Codex task from a spatial work area. A local Node.js bridge relays bounded text, status, and approval events between one Lens client and the Codex App Server on a paired Mac. The Lens supports a clearly labeled sample mode when it is disconnected.
 
 ## Target User
 
@@ -18,8 +18,8 @@ The user opens the world-locked launcher, views the selected project thread, dic
 
 ### Epic 1: Spatial access and placement
 
-- As a SPECS user, I want to open and close RunCodex from a world-locked launcher so that the conversation is available in my work area.
-- As a SPECS user, I want to move or recenter the launcher and panel so that I can place the interface where it is comfortable to read and reach.
+- As a Specs user, I want to open and close RunCodex from a world-locked launcher so that the conversation is available in my work area.
+- As a Specs user, I want to move or recenter the launcher and panel so that I can place the interface where it is comfortable to read and reach.
 
 Acceptance criteria:
 
@@ -87,12 +87,18 @@ Acceptance criteria:
 
 The spatial launcher and panel, conversation and status display, reviewed ASR composer, live message streaming, real approval controls, local bridge, project-scoped thread access, and explicit sample/disconnected state.
 
-## What We Would Add With More Time
+## What's Next for RunCodex
 
-- Verify the complete live message and approval round trip in a fresh Preview session.
-- Verify all hand interactions and speech input on physical SPECS hardware.
-- Improve recovery and usability based on device testing, including placement comfort and long-session behavior.
-- Record and review the complete submission demo on the target device or Preview setup.
+These are future product ideas, not implemented features:
+
+- Let users switch quickly between multiple Codex tasks and see a concise summary for each.
+- Add unobtrusive notifications for important status changes, such as a turn completing or an approval needing attention.
+- Give approval requests clearer context about the proposed action and its impact, while keeping the user in control of every decision.
+- Improve reconnection and recovery so an interrupted session can resume clearly and safely.
+
+## Verification Note
+
+The participant reports that the Lens runs in Lens Studio Preview with SPECS 27 selected, and that live message sending/receiving and real approval requests handled with Approve/Reject work there. Physical Specs device behavior is not verified by that Preview result.
 
 ## Submission Proof Points
 

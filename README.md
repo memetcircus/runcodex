@@ -1,19 +1,19 @@
 # RunCodex
 
-**A spatial Codex companion for SPECS.** RunCodex brings a project-scoped Codex conversation into the user's work area, so they can check progress, dictate a follow-up, and handle a real approval request without returning to a laptop screen.
+**A spatial Codex companion for Specs.** RunCodex brings a project-scoped Codex conversation into the user's work area, so they can check progress, dictate a follow-up, and handle a real approval request without returning to a laptop screen.
 
 The Lens uses a small world-locked launcher and an on-demand conversation panel. The panel stays at its chosen place as the user turns; a grab bar lets them move it when needed. It is designed as a glasses interface, not a web page floating in front of the face.
 
 ## What it does
 
 - Shows the selected Codex task, live turn status, recent conversation, and completion response.
-- Uses SPECS speech recognition for **Speak / Stop** dictation. The user reviews the transcript before pressing **Send**.
+- Uses Specs speech recognition for **Speak / Stop** dictation. The user reviews the transcript before pressing **Send**.
 - Streams Codex responses into a scrollable conversation viewport.
 - Shows **Approve** and **Reject** only for a pending approval received from the live Codex connection.
 - Keeps the panel hidden until the launcher is opened, and lets the user reposition the launcher and panel together.
 - Includes a clearly marked sample flow for trying the interface without a live connection.
 
-RunCodex does not include a custom virtual keyboard. Speech input availability depends on the Lens Studio Preview or SPECS environment and its ASR permissions and network access.
+RunCodex does not include a custom virtual keyboard. Speech input availability depends on the Lens Studio Preview or Specs environment and its ASR permissions and network access.
 
 ## How the connection works
 
@@ -21,7 +21,7 @@ RunCodex does not include a custom virtual keyboard. Speech input availability d
 flowchart LR
     user([User])
 
-    subgraph specs[ SPECS glasses · Lens Studio ]
+    subgraph specs[ Specs glasses · Lens Studio ]
         voice[Speak / Stop<br/>ASR dictation]
         review[Review transcript<br/>then Send]
         lens[RunCodex Lens<br/>conversation · status · approvals]
@@ -46,7 +46,7 @@ The bridge runs on the paired Mac. It is a development relay, not a hosted servi
 
 ### Components and data flow
 
-- **RunCodex Lens** — the SPECS interface in Lens Studio. It owns the launcher, spatial panel, task status, conversation view, speech-to-text draft, and approval controls. The user reviews dictated text before sending it.
+- **RunCodex Lens** — the Specs interface in Lens Studio. It owns the launcher, spatial panel, task status, conversation view, speech-to-text draft, and approval controls. The user reviews dictated text before sending it.
 - **RunCodex bridge** — a small Node.js relay on the paired Mac. It authenticates the Lens with a local pairing token, exposes only the supported App Server methods, and keeps thread discovery scoped to `RUNCODEX_PROJECT_ROOT`.
 - **Codex App Server** — the local Codex service reached by the bridge over its Unix-domain socket. It owns the thread, turn, tool execution, and approval state.
 
@@ -67,7 +67,7 @@ The bridge uses unencrypted WebSocket on a trusted local network. **Do not port-
 2. Open [`Specs Base Template 2.esproj`](Specs%20Base%20Template%202.esproj) in Lens Studio. This is the current manifest filename; the Lens/product is named **RunCodex**.
 3. Run the project in Lens Studio Preview. Without local bridge credentials, the Lens stays in sample mode and labels its content **SAMPLE DATA — NOT CONNECTED TO CODEX**.
 
-The project file currently records Lens Studio **5.23.2** and the **Spectacles** target. SPECS 27 migration and physical-device behavior have not been verified in this repository; check the project configuration and Snap's current migration guide before targeting a different SDK version.
+The current Lens Studio project and manifest report Lens Studio **5.23.2** and `targetPlatform: Spectacles` (the editor enum for the **Specs** glasses platform). The Lens has also been run successfully in Preview with **SPECS 27** selected, according to participant testing. The Preview simulation target and the manifest's platform enum are separate settings; the manifest value does not contradict that Preview result. This is Preview verification, not a physical-device test. See [Snap's Preview target documentation](https://www.developers.snap.com/lens-studio/features/scripting/external-debugger).
 
 ## Run the local bridge
 
@@ -91,7 +91,7 @@ The bridge must also be able to reach the Codex App Server. Its default socket l
 - When the connected Codex task raises a real approval request, review it and choose **Approve** or **Reject**. Sample mode is labeled and does not represent a live Codex approval.
 - Pinch and drag the bar beneath the panel to move the launcher and panel together.
 
-Preview interaction and ASR support can differ from the physical glasses. This repository has not been tested on physical SPECS hardware; no device-specific behavior is claimed here.
+User-confirmed in Lens Studio Preview: live Codex message sending and receiving, and handling real approval requests with **Approve** or **Reject**. This Preview verification does not establish behavior on physical Specs glasses; no physical-device verification is claimed here.
 
 ## Planning and implementation
 
@@ -111,6 +111,6 @@ The project was built in Lens Studio using the CLAD workflow and Lens Studio MCP
 ## Status and limitations
 
 - TypeScript compilation and Lens Studio Preview refresh have passed in the current development checkout.
-- Live message delivery and approval handling depend on a correctly paired local Codex App Server; verify those paths in your own setup before relying on them.
-- No physical SPECS device test has been performed.
-- The project manifest has not been confirmed as migrated to SPECS 27.
+- User-confirmed in Lens Studio Preview: sending and receiving live Codex messages, and handling a real approval request with **Approve** or **Reject**.
+- Live use still depends on a correctly paired local Codex App Server and private-network bridge setup.
+- The project targets the `Spectacles` platform enum in Lens Studio 5.23.2 and has been tested in Preview with **SPECS 27** selected. Physical Specs device behavior remains unverified.

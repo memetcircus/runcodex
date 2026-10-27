@@ -14,7 +14,7 @@ The user asks Codex to handle a coding task, then continues with their day. RunC
 ## Product or overlay
 - Type: a spatial Codex conversation client with task status and approval controls.
 - What it connects to: a local development bridge relays text and supported status/approval events between the Lens and Codex App Server on the paired Mac. The bridge is development-only, not a public cloud service or arbitrary shell interface. Sample mode remains available when no live bridge is configured.
-- Input and response: the SPECS text-input/ASR mechanism supplies dictated text; the user reviews and sends it from the panel. Codex text appears in the conversation view, with long content scrollable inside its viewport.
+- Input and response: the Specs text-input/ASR mechanism supplies dictated text; the user reviews and sends it from the panel. Codex text appears in the conversation view, with long content scrollable inside its viewport.
 - Trust cues: show the live connection state when paired. In sample mode, clearly label sample task data as “SAMPLE DATA — NOT CONNECTED TO CODEX”; never present sample approvals as live requests.
 
 ## Where things live
@@ -26,7 +26,7 @@ The user asks Codex to handle a coding task, then continues with their day. RunC
 
 ## Hands and input
 - Open/close: pinch the launcher and use the panel's close controls.
-- Compose: use the supported SPECS text-input/ASR path to dictate a message, review it in the composer, then select Send. Sending is disabled while disconnected or while a send is already pending.
+- Compose: use the supported Specs text-input/ASR path to dictate a message, review it in the composer, then select Send. Sending is disabled while disconnected or while a send is already pending.
 - Respond to a real approval: review its full text in the approval card and pinch Approve or Reject. The card disappears when the request is resolved; feedback stays in the conversation.
 - Read responses: assistant text is displayed directly in the conversation/summary viewport and can be scrolled with the supported hand gesture. Long user messages also remain readable in their bounded viewport.
 - Controls provide clear visual feedback and remain reachable at the selected workspace placement.
@@ -39,7 +39,7 @@ The user asks Codex to handle a coding task, then continues with their day. RunC
 - Offline state: make bridge disconnection clear and disable live message sending until the connection recovers.
 
 ## Done criteria
-Check these in Lens Studio Preview where the required bridge and SPECS input simulation are available; distinguish mock/sample checks from live protocol checks.
+Check these in Lens Studio Preview where the required bridge and Specs input simulation are available; distinguish mock/sample checks from live protocol checks.
 1. The launcher stays fixed at its selected world placement; the panel opens at the same work area and remains readable without clipping as the user turns.
 2. The composer accepts reviewed text through the supported input mechanism; Send shows clear sending, success, offline, and error behavior.
 3. User messages and Codex responses appear as separate conversation messages; long content scrolls without moving the rest of the panel.
@@ -54,12 +54,12 @@ Check these in Lens Studio Preview where the required bridge and SPECS input sim
 
 ## Risks and open questions
 - The local Codex bridge depends on the paired Mac's Codex App Server being available; the bridge is not a public or always-on service.
-- The Preview and current code establish world-locked placement with an explicit recenter action, but long-term comfort, real SPECS text-input behavior, hand tracking, and placement comfort remain unverified without physical glasses.
-- Confirm the exact live conversation/send/approval round trip in the intended Preview setup before describing it as end-to-end verified.
+- Physical-device speech recognition, hand tracking, long-term comfort, and placement comfort are not verified by Preview testing.
+- The participant reports successful Lens Studio Preview runs with SPECS 27 selected, including live Codex message sending/receiving and a real approval request handled with Approve/Reject. This does not verify physical Specs device behavior.
 
 ## Build notes for CLAD
-- Build for SPECS so it runs and can be demonstrated in Lens Studio's preview. No SPECS device is available.
-- Use Spectacles Interaction Kit (SIK) and UI Kit for all interactions, so they work with the mouse in Interactive Preview and with LEAF.
+- Build for the Specs glasses platform. The current project manifest uses the `Spectacles` target-platform enum, and the participant reports successful Preview runs with SPECS 27 selected; physical-device verification is not claimed.
+- Use Spectacles Interaction Kit (SIK) and UI Kit package names for interactions, so they work with the mouse in Interactive Preview and with LEAF.
 - Build any stand-in exactly as described above, and keep it obvious in the scene.
 - Use real-world scale in centimeters. Place the launcher and panel once in the near-field arm-reach zone, slightly below the display boresight, then keep them world-locked until the user drags the grab bar. Keep targets large enough for comfortable direct hand interaction and use the SIK InteractionPlane for the panel's near-field targeting.
 - The display is additive: black renders as transparent. Don't rely on black or very dark content to be seen; keep text light and readable from where the user stands.

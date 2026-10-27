@@ -4,16 +4,16 @@
 
 ## Project Name Candidates
 
-- RunCodex (selected): a spatial Codex conversation companion for SPECS.
+- RunCodex (selected): a spatial Codex conversation companion for Specs.
 - Codex Workbench: a more task-oriented alternative; not selected because the experience centers on the existing Codex conversation.
 
 ## One-Line Summary
 
-RunCodex brings a project-scoped Codex conversation into a SPECS work area, where a developer can review streamed progress, dictate and send a follow-up, and respond to a real approval request.
+RunCodex brings a project-scoped Codex conversation into a Specs work area, where a developer can review streamed progress, dictate and send a follow-up, and respond to a real approval request.
 
 ## Target User
 
-Developers who use Codex on a paired Mac and want to keep an eye on a coding task while looking away from the laptop. The project targets SPECS glasses and Lens Studio Preview; physical-device behavior is not claimed as verified.
+Developers who use Codex on a paired Mac and want to keep an eye on a coding task while looking away from the laptop. The Lens Studio project targets Specs glasses through the manifest's `Spectacles` enum and has been run in Preview with SPECS 27 selected; physical-device behavior is not claimed as verified.
 
 ## Problem
 
@@ -30,7 +30,7 @@ Following a coding task and responding to its approval requests currently pulls 
 
 ## What We Are Building
 
-- A world-locked SPECS Lens with a launcher and movable conversation panel.
+- A world-locked Specs Lens with a launcher and movable conversation panel.
 - A readable task status and recent conversation view with bounded scrolling.
 - Speak/Stop speech recognition with a visible draft and explicit Send action.
 - Live user-message, assistant-message, turn-status, and approval updates.
@@ -42,17 +42,17 @@ Following a coding task and responding to its approval requests currently pulls 
 - A public cloud service, multi-user relay, arbitrary shell, or remote project-file browser.
 - A custom virtual keyboard, code editor, or spoken assistant response.
 - Automatic approval or invented sample approvals presented as real.
-- A claim of physical SPECS device, comfort, or on-device interaction verification.
+- A claim of physical Specs device, comfort, or on-device interaction verification.
 
 ## Inspiration And References
 
 - The existing Codex thread and approval workflow, adapted to a spatial interface rather than reproduced as a desktop chat window.
-- SPECS hand interaction and speech input patterns documented by Snap.
+- Specs hand interaction and speech input patterns documented by Snap.
 - See [design-brief.md](design-brief.md) and [two-way-codex-plan.md](two-way-codex-plan.md) for the project-specific design and implementation record.
 
 ## Demo Path
 
-In Lens Studio Preview, open the launcher, show the conversation panel, demonstrate the composer and message layout, and explain the local bridge flow. If a live Codex connection is configured, show a real turn and approval round trip. Otherwise, identify sample content as sample-only and do not present it as live functionality.
+In Lens Studio Preview, open the launcher, show the conversation panel, and demonstrate the composer and message layout. Live Codex message sending/receiving and real approval handling with Approve/Reject have been exercised successfully in Preview, based on the participant's report. Explain the local bridge flow. Identify sample content as sample-only and do not present it as live functionality.
 
 ## Submission Story
 

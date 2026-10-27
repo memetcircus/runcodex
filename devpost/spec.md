@@ -4,14 +4,14 @@
 
 ## Overview
 
-RunCodex consists of a Lens Studio SPECS Lens, a local Node.js WebSocket bridge on the paired Mac, and the Codex App Server reached through its local Unix-domain socket. The Lens owns the spatial interface and user review step. The bridge authenticates the Lens, constrains the supported methods and project threads, and filters forwarded content. The App Server owns conversation, tool execution, and approval state.
+RunCodex consists of a Lens Studio Specs Lens, a local Node.js WebSocket bridge on the paired Mac, and the Codex App Server reached through its local Unix-domain socket. The Lens owns the spatial interface and user review step. The bridge authenticates the Lens, constrains the supported methods and project threads, and filters forwarded content. The App Server owns conversation, tool execution, and approval state.
 
 ## Stack
 
-- Lens Studio project targeting Spectacles; the checked-in manifest reports Lens Studio 5.23.2.
+- Lens Studio project targeting the Specs glasses platform; the live editor setting and manifest report the `Spectacles` target enum and Lens Studio 5.23.2. The participant reports successful Preview runs with SPECS 27 selected. Preview simulation selection is separate from the manifest's platform enum and does not claim physical-device testing.
 - TypeScript Lens UI in `Assets/Scripts/RunCodexUI.ts`.
-- Spectacles Interaction Kit and UIKit assets/packages for hand interaction and UI.
-- SPECS ASR Module for speech-to-text; the user reviews text and explicitly sends it.
+- Spectacles Interaction Kit and UIKit assets/packages for hand interaction and UI (package names retained as written).
+- Specs ASR Module for speech-to-text; the user reviews text and explicitly sends it.
 - Node.js bridge in `Assets/RunCodexBridge/bridge.mjs`.
 - WebSocket on the private LAN between Lens and bridge; local Unix-domain socket between bridge and App Server.
 
@@ -20,7 +20,7 @@ RunCodex consists of a Lens Studio SPECS Lens, a local Node.js WebSocket bridge 
 ```mermaid
 flowchart LR
     user([Developer])
-    subgraph specs[SPECS Lens Studio]
+    subgraph specs[Specs Lens Studio]
         ui[RunCodex UI<br/>launcher · panel · status · conversation]
         asr[ASR Speak / Stop]
         review[Review draft<br/>and Send]
@@ -74,7 +74,7 @@ The public scene should not contain private pairing credentials. Configure conne
 Implements: `prd.md > Epics 1-4`
 
 - Owns launcher, spatial panel, task status, conversation history, composer, and approval controls.
-- Uses SPECS speech recognition to create a draft, then requires explicit user review and Send.
+- Uses Specs speech recognition to create a draft, then requires explicit user review and Send.
 - Keeps long messages in a bounded viewport and displays connection/sample state.
 
 ### RunCodex bridge
@@ -95,9 +95,10 @@ Implements: conversation and execution behavior used by `prd.md > Epics 2-4`.
 
 ## External APIs And Dependencies
 
-- [Snap ASR Module](https://www.developers.snap.com/spectacles/about-spectacles-features/apis/asr-module) — SPECS speech-to-text interface. Physical-device support and permission behavior should be verified on the target setup.
+- [Snap ASR Module](https://www.developers.snap.com/spectacles/about-spectacles-features/apis/asr-module) — Specs speech-to-text interface. Physical-device support and permission behavior are not established by the Preview verification.
 - [Spectacles Interaction Kit](https://developers.snap.com/spectacles/spectacles-frameworks/spectacles-interaction-kit/get-started?lang=en-US&overrideHashedIp=w9qu6) — hand-interaction building blocks.
 - [Spectacles Lens project setup](https://developers.snap.com/spectacles/get-started/start-building/spectacles-lens-setup) — platform and project setup.
+- [Lens Studio Preview target documentation](https://www.developers.snap.com/lens-studio/features/scripting/external-debugger) — Preview target selection, including SPECS 27.
 - [Codex App Server](https://developers.openai.com/codex/app-server/) — conversation and turn protocol. The bridge's local socket discovery remains environment-specific.
 - CLAD plugin and Lens Studio MCP are editor build tools, not runtime services in the shipped Lens.
 
@@ -110,9 +111,10 @@ Codex App Server performs the coding task and invokes its configured tools under
 - The local pairing token and bridge URL are sensitive local configuration; keep them out of tracked scene changes, docs, logs, and screenshots.
 - The bridge's WebSocket transport is unencrypted; use a trusted private network and do not port-forward it.
 - A compatible App Server socket must be available to the bridge; do not guess the socket path.
-- Preview compile/log checks are recorded in the project notes, but the complete live conversation/approval flow and physical SPECS behavior must be verified independently before claiming them as end-to-end tested.
-- Check the manifest and Snap's current migration documentation before targeting a newer SPECS SDK.
+- The participant reports successful live message send/receive and real approval Approve/Reject flows in Lens Studio Preview. This does not verify physical Specs device behavior, including on-device ASR, hand interaction, comfort, or placement.
+- The manifest and live editor setting identify the project platform enum as `Spectacles` under Lens Studio 5.23.2. The participant reports that the Lens runs successfully in Preview with SPECS 27 selected; this does not establish physical-device behavior.
+- Before device deployment, confirm the intended target device and SDK setup in the current Lens Studio project and Snap documentation.
 
 ## Demo And Submission Flow
 
-Show the Lens in Lens Studio Preview, explain the spatial launcher and panel, and demonstrate the user path that is available. For live behavior, show the paired bridge and a real turn/approval event. If using sample mode, label it clearly. Keep the demonstration video under three minutes, upload it publicly to YouTube, and make the repository and testing instructions available as required by the event.
+Show the Lens in Lens Studio Preview, explain the spatial launcher and panel, and demonstrate live message sending/receiving and a real approval handled with Approve/Reject. If using sample mode, label it clearly. Keep the demonstration video under three minutes, upload it publicly to YouTube, and make the repository and testing instructions available as required by the event.
