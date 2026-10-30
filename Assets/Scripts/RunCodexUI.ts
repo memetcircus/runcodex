@@ -72,6 +72,10 @@ export class RunCodexUI extends BaseScriptComponent {
   bridgeToken: string = ""
 
   private panel!: SceneObject
+  private sessionPicker!: SceneObject
+  private resumeLastButton!: SceneObject
+  private sessionChoice: "none" | "resume" | "new" = "none"
+  private latestThreadId = ""
   private launcher!: SceneObject
   private placementRoot!: SceneObject
   private dragHandle!: SceneObject
@@ -189,11 +193,13 @@ export class RunCodexUI extends BaseScriptComponent {
     this.placementRoot = global.scene.createSceneObject("RunCodexPlacementRoot")
     this.createRunButton()
     this.createPanel()
+    this.createSessionPicker()
     this.contentFlex.onLayoutComplete.add(() => this.positionSummaryViewportBackdrop())
     this.opaqueBackdrop = this.findObject("RunCodexOpaqueBackdrop")
     this.opaqueBackdrop.enabled = false
     this.refreshState()
     this.panel.enabled = false
+    this.sessionPicker.enabled = false
 
     this.createEvent("UpdateEvent").bind(() => {
       this.updateHandSwipes()
@@ -255,8 +261,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.placementRetryEvent.reset(0.35)
     if (this.bridgeUrl.trim().length > 0 && this.bridgeToken.trim().length > 0) {
       this.liveMode = true
-      this.setConnectionLabel(LIVE_CONNECTING_LABEL)
-      this.connectLiveBridge()
+      this.setConnectionLabel("Connect Codex")
     }
     this.refreshState()
   }
@@ -358,7 +363,10 @@ export class RunCodexUI extends BaseScriptComponent {
       if (message.error) {
         if (method === "initialize" && String(message.error.message || "").toLowerCase().includes("already initialized")) {
           this.codexReady = true
-          this.sendLiveRpc("thread/list", {limit: 50})
+          if (this.sessionChoice === "new") {
+            this.sessionChoice = "none"
+            this.sendLiveRpc("thread/start", {})
+          } else this.sendLiveRpc("thread/list", {limit: 50})
           return
         }
         print("[RunCodex] Codex bridge RPC failed (" + method + "): " + message.error.message)
@@ -381,13 +389,18 @@ export class RunCodexUI extends BaseScriptComponent {
       if (method === "initialize") {
         this.codexReady = true
         this.liveSocket?.send(JSON.stringify({method: "initialized", params: {}}))
-        this.sendLiveRpc("thread/list", {limit: 50})
+        if (this.sessionChoice === "new") {
+          this.sessionChoice = "none"
+          this.sendLiveRpc("thread/start", {})
+        } else this.sendLiveRpc("thread/list", {limit: 50})
       } else if (method === "thread/list") {
         const threads = message.result?.data || []
+        this.latestThreadId = threads[0]?.id || ""
+        this.updateResumeLastButton()
+        if (this.sessionChoice !== "resume") return
         if (threads.length === 0) {
-          this.liveThreadId = ""
-          this.setConnectionLabel("NO TASK IN THIS PROJECT")
-          this.refreshState()
+          this.findText("ApprovalFeedback").text = "No previous session found. Choose ＋ New Session."
+          this.sessionChoice = "none"
           return
         }
         // Prefer an approval that is already waiting in this project. The
@@ -395,12 +408,14 @@ export class RunCodexUI extends BaseScriptComponent {
         const thread = threads.find((candidate: any) =>
           Array.isArray(candidate.status?.activeFlags) && candidate.status.activeFlags.includes("waitingOnApproval")
         ) || threads[0]
-        this.liveThreadId = thread.id
-        this.setConnectionLabel(LIVE_CONNECTED_LABEL)
-        this.findText("TaskName").text = thread.name || "Codex task"
-        this.syncThreadStatus(thread.status)
-        this.sendLiveRpc("thread/resume", {threadId: thread.id, excludeTurns: true})
-        this.sendLiveRpc("thread/turns/list", {threadId: thread.id, limit: 5, sortDirection: "desc", itemsView: "full"})
+        this.activateThread(thread)
+      } else if (method === "thread/start") {
+        const thread = message.result?.thread
+        if (!thread?.id) return
+        this.latestThreadId = thread.id
+        this.updateResumeLastButton()
+        this.resetForNewThread()
+        this.activateThread(thread)
       } else if (method === "thread/turns/list") {
         this.readLiveTurnSummary(message.result?.data || [])
       } else if ((method === "turn/start" || method === "turn/steer") && this.pendingSendRpcId === Number(message.id)) {
@@ -595,13 +610,6 @@ export class RunCodexUI extends BaseScriptComponent {
       this.panel.enabled = true
       this.launcher.enabled = false
       this.refreshState()
-    if (this.liveMode && (!this.liveConnected || !this.codexReady)) {
-        this.liveDisconnectRequested = false
-        if (this.liveConnected) this.sendLiveRpc("initialize", {
-          clientInfo: {name: "runcodex_specs", title: "RunCodex for SPECS", version: "0.1.0"}
-        })
-        else this.connectLiveBridge()
-      }
     })
 
     const sampleTag = global.scene.createSceneObject("ExternalSampleDataLabel")
@@ -625,6 +633,203 @@ export class RunCodexUI extends BaseScriptComponent {
     text.verticalAlignment = VerticalAlignment.Center
     text.layoutRect = Rect.create(-15, 15, -2.5, 2.5)
     this.cue = cue
+  }
+
+  private createSessionPicker(): void {
+    const root = global.scene.createSceneObject("RunCodexSessionPicker")
+    root.setParent(this.placementRoot)
+    root.createComponent("Component.Canvas")
+    const plane = root.createComponent(InteractionPlane.getTypeName()) as InteractionPlane
+    plane.planeSize = new vec2(28, 34)
+    plane.targetingVisual = 0
+    const card = global.scene.createSceneObject("RunCodexSessionPickerSurface")
+    card.setParent(root)
+    const surface = card.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    surface.initialize()
+    surface.size = new vec2(28, 34)
+    surface.setBackgroundGradient({
+      enabled: true, type: "Linear", start: new vec2(-1, 1), end: new vec2(1, -1),
+      stop0: {enabled: true, color: new vec4(0.006, 0.018, 0.044, 1), percent: 0},
+      stop1: {enabled: true, color: new vec4(0.016, 0.064, 0.12, 1), percent: 1}
+    })
+    surface.border = true
+    surface.borderType = "Color"
+    surface.borderColor = new vec4(0.08, 0.34, 0.5, 1)
+    surface.borderSize = 0.04
+    const titleObject = global.scene.createSceneObject("SessionPickerTitle")
+    titleObject.setParent(root)
+    titleObject.getTransform().setLocalPosition(new vec3(0, 11.2, 0.3))
+    const title = titleObject.createComponent("Component.Text") as Text
+    title.text = "Codex Sessions"
+    title.size = 42
+    title.depthTest = false
+    title.horizontalAlignment = HorizontalAlignment.Center
+    title.verticalAlignment = VerticalAlignment.Center
+    title.layoutRect = Rect.create(-13, 13, -2, 2)
+    this.createPickerButton(root, "NewSessionButton", "＋  New Session", 5.3, () => this.startNewSession())
+    this.resumeLastButton = this.createPickerButton(root, "ResumeLastSessionButton", "Resume Last Session", 0.2, () => this.resumeLastSession())
+    this.createPickerButton(root, "DisconnectCodexButton", "Disconnect Codex", -4.9, () => {
+      this.disconnectCodex()
+      root.enabled = false
+      this.panel.enabled = true
+      this.refreshState()
+    })
+    const cancel = this.createPickerButton(root, "SessionPickerCancelButton", "Back", -9.8, () => {
+      root.enabled = false
+      this.panel.enabled = true
+      this.refreshState()
+    })
+    const cancelButton = cancel.getComponent(Button.getTypeName()) as Button
+    cancelButton.setTheme("SnapOS3", "Ghost")
+    this.createSessionPickerDragHandle(root)
+    this.sessionPicker = root
+    this.updateResumeLastButton()
+  }
+
+  private createSessionPickerDragHandle(parent: SceneObject): void {
+    const handle = global.scene.createSceneObject("SessionPickerDragHandle")
+    handle.setParent(parent)
+    handle.getTransform().setLocalPosition(new vec3(0, -15.2, 0.55))
+
+    const surface = handle.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
+    surface.initialize()
+    surface.size = new vec2(18, 2.8)
+    surface.setBackgroundGradient({
+      enabled: true,
+      type: "Linear",
+      start: new vec2(-1, 1),
+      end: new vec2(1, -1),
+      stop0: {enabled: true, color: new vec4(0.012, 0.075, 0.12, 1), percent: 0},
+      stop1: {enabled: true, color: new vec4(0.022, 0.14, 0.19, 1), percent: 1}
+    })
+    surface.border = true
+    surface.borderType = "Color"
+    surface.borderColor = new vec4(0.12, 0.48, 0.64, 1)
+    surface.borderSize = 0.055
+    surface.opacity = 1
+
+    const label = handle.createComponent(ElementContent.getTypeName()) as ElementContent
+    label.text = "DRAG TO MOVE"
+    label.textSize = 27
+    label.sizeOverride = new vec2(17, 2.6)
+    label.contentAlignment = "center"
+
+    const collider = handle.createComponent("Physics.ColliderComponent") as ColliderComponent
+    const colliderShape = Shape.createBoxShape()
+    colliderShape.size = new vec3(18, 4.4, 1.2)
+    collider.shape = colliderShape
+    collider.debugDrawEnabled = false
+
+    const interactable = handle.createComponent(Interactable.getTypeName()) as Interactable
+    interactable.targetingMode = 3
+    const manipulation = handle.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation
+    manipulation.setManipulateRoot(this.placementRoot.getTransform())
+    manipulation.setCanRotate(false)
+    manipulation.setCanScale(false)
+    manipulation.enableStretchZ = false
+    const setHighlight = (active: boolean) => {
+      surface.borderColor = active ? new vec4(0.22, 0.86, 1, 1) : new vec4(0.12, 0.48, 0.64, 1)
+      label.text = active ? "MOVE PANEL" : "DRAG TO MOVE"
+    }
+    interactable.onHoverEnter.add(() => setHighlight(true))
+    interactable.onHoverExit.add(() => setHighlight(false))
+    manipulation.onManipulationStart.add(() => setHighlight(true))
+    manipulation.onManipulationEnd.add(() => setHighlight(false))
+  }
+
+  private createPickerButton(parent: SceneObject, name: string, text: string, y: number, action: () => void): SceneObject {
+    const object = global.scene.createSceneObject(name)
+    object.setParent(parent)
+    object.getTransform().setLocalPosition(new vec3(0, y, 0.4))
+    const button = object.createComponent(Button.getTypeName()) as Button
+    button.setTheme("SnapOS3", "Secondary")
+    button.size = new vec3(22, 4.1, 1)
+    button.onTriggerUp.add(action)
+    const label = object.createComponent(ElementContent.getTypeName()) as ElementContent
+    label.text = text
+    label.textSize = 34
+    label.sizeOverride = new vec2(21, 3.6)
+    label.contentAlignment = "center"
+    return object
+  }
+
+  private updateResumeLastButton(): void {
+    if (!this.resumeLastButton) return
+    const button = this.resumeLastButton.getComponent(Button.getTypeName()) as Button
+    button.inactive = this.latestThreadId.length === 0
+    const label = this.resumeLastButton.getComponent(ElementContent.getTypeName()) as ElementContent
+    label.text = this.latestThreadId ? "Resume Last Session" : "No Previous Session"
+  }
+
+  private openSessionPicker(): void {
+    this.panel.enabled = false
+    this.sessionPicker.enabled = true
+    this.launcher.enabled = false
+    this.sessionChoice = "none"
+    this.findText("ApprovalFeedback").text = ""
+    this.updateResumeLastButton()
+    if (this.liveConnected && this.codexReady) this.sendLiveRpc("thread/list", {limit: 50})
+    else {
+      this.sessionChoice = "none"
+      this.liveDisconnectRequested = false
+      this.connectLiveBridge()
+    }
+  }
+
+  private resumeLastSession(): void {
+    this.sessionChoice = "resume"
+    if (this.liveConnected && this.codexReady) this.sendLiveRpc("thread/list", {limit: 50})
+    else this.connectLiveBridge()
+    this.sessionPicker.enabled = false
+    this.panel.enabled = true
+    this.refreshState()
+  }
+
+  private startNewSession(): void {
+    this.sessionChoice = "new"
+    this.sessionPicker.enabled = false
+    this.panel.enabled = true
+    this.resetForNewThread()
+    this.findText("ApprovalFeedback").text = "Starting a new Codex session…"
+    this.refreshState()
+    if (this.liveConnected && this.codexReady) this.sendLiveRpc("thread/start", {})
+    else this.connectLiveBridge()
+  }
+
+  private activateThread(thread: any): void {
+    this.liveThreadId = thread.id
+    this.sessionChoice = "none"
+    this.sessionPicker.enabled = false
+    this.panel.enabled = true
+    this.setConnectionLabel(LIVE_CONNECTED_LABEL)
+    this.findText("TaskName").text = thread.name || "Codex task"
+    this.syncThreadStatus(thread.status)
+    this.sendLiveRpc("thread/resume", {threadId: thread.id, excludeTurns: true})
+    this.sendLiveRpc("thread/turns/list", {threadId: thread.id, limit: 5, sortDirection: "desc", itemsView: "full"})
+  }
+
+  private resetForNewThread(): void {
+    this.liveThreadId = ""
+    this.liveApprovalId = null
+    this.liveApprovalMethod = ""
+    this.currentTurnId = ""
+    this.lastUserMessage = ""
+    this.lastUserMessageText.text = ""
+    this.userMessageLines = []
+    this.messageDraft = ""
+    this.finalizedVoiceText = ""
+    this.liveSummary = ""
+    this.summaryLines = []
+    this.summaryLineOffset = 0
+    this.approved = false
+    this.composerOpen = false
+    this.showingFullSummary = true
+    this.userMessageLineOffset = 0
+    this.lastUserMessageRow.enabled = false
+    this.state = "Working"
+    this.findText("TaskName").text = "New Codex session"
+    this.findText("ApprovalFeedback").text = ""
+    this.updateLiveContentView()
   }
 
   private createPanel(): void {
@@ -1178,16 +1383,7 @@ export class RunCodexUI extends BaseScriptComponent {
       this.restart()
       return
     }
-
-    if (this.liveConnected || this.liveSocket?.readyState === 1) {
-      this.disconnectCodex()
-      return
-    }
-
-    if (this.liveSocket?.readyState !== 0) {
-      this.liveDisconnectRequested = false
-      this.connectLiveBridge()
-    }
+    this.openSessionPicker()
   }
 
   private disconnectCodex(): void {
@@ -1265,7 +1461,7 @@ export class RunCodexUI extends BaseScriptComponent {
     const connectionButtonLabel = this.connectionButton.getComponent(ElementContent.getTypeName()) as ElementContent
     connectionButtonLabel.text = !this.liveMode
       ? "Restart sample"
-      : connecting ? "Connecting…" : this.liveConnected ? "Disconnect Codex" : "Connect Codex"
+      : connecting ? "Connecting…" : this.liveConnected ? "Sessions" : "Connect Codex"
   }
 
   private updateWorkingBreath(): void {

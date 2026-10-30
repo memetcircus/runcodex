@@ -10,7 +10,7 @@ const socketPath = process.env.CODEX_APP_SERVER_SOCKET ?? `${os.homedir()}/.code
 const host = process.env.RUNCODEX_BRIDGE_HOST ?? '0.0.0.0'
 const port = Number(process.env.RUNCODEX_BRIDGE_PORT ?? 8765)
 const token = process.env.RUNCODEX_BRIDGE_TOKEN ?? randomBytes(24).toString('base64url')
-const allowedMethods = new Set(['initialize', 'initialized', 'thread/list', 'thread/turns/list', 'thread/resume', 'turn/start', 'turn/steer'])
+const allowedMethods = new Set(['initialize', 'initialized', 'thread/list', 'thread/start', 'thread/turns/list', 'thread/resume', 'turn/start', 'turn/steer'])
 // Codex app-server can include large recent-turn payloads. Keep a firm cap,
 // but allow those frames through so the local relay does not drop its client.
 const MAX_WEBSOCKET_FRAME_BYTES = 32 * 1024 * 1024
@@ -118,6 +118,7 @@ function forwardRpc(message) {
       return
     }
   }
+  if (message.method === 'thread/start') message.params = {...params, cwd: projectRoot}
   if (message.method === 'turn/start' || message.method === 'turn/steer') {
     const threadId = params.threadId
     const input = params.input
@@ -192,7 +193,15 @@ function handleCodexMessage(message) {
     pairedState.rpcMethods.delete(String(message.id))
     const requestedThreadId = pairedState.rpcThreads.get(String(message.id))
     pairedState.rpcThreads.delete(String(message.id))
-    if (method === 'thread/list' && message.result?.data && Array.isArray(message.result.data)) {
+    if (method === 'thread/start' && message.result?.thread?.id) {
+      allowedThreadIds.add(message.result.thread.id)
+      message.result.thread = {
+        id: message.result.thread.id,
+        name: message.result.thread.name ?? 'New Codex session',
+        updatedAt: message.result.thread.updatedAt,
+        status: message.result.thread.status,
+      }
+    } else if (method === 'thread/list' && message.result?.data && Array.isArray(message.result.data)) {
       // thread/list was already filtered by app-server's exact cwd filter.
       allowedThreadIds.clear()
       for (const thread of message.result.data) if (thread.id) allowedThreadIds.add(thread.id)
