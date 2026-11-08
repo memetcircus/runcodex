@@ -188,11 +188,6 @@ export class RunCodexUI extends BaseScriptComponent {
   private reconnectEvent!: DelayedCallbackEvent
   private placementRetryEvent!: DelayedCallbackEvent
   private launcherSampleLabel!: ElementContent
-  private chatGPTControl!: SceneObject
-  private chatGPTButton!: Button
-  private chatGPTButtonLabel!: ElementContent
-  private chatGPTStatus!: ElementContent
-  private chatGPTDemoStep: "ready" | "consent" | "complete" = "ready"
 
   onAwake(): void {
     this.placementRoot = global.scene.createSceneObject("RunCodexPlacementRoot")
@@ -249,7 +244,6 @@ export class RunCodexUI extends BaseScriptComponent {
     const coolWhite = new vec4(0.94, 0.98, 1, 1)
     const cyan = new vec4(0.3, 0.88, 1, 1)
     this.setTextStyleTree(this.launcher, coolWhite)
-    this.setTextStyleTree(this.chatGPTControl, coolWhite)
     this.setTextStyleTree(this.findObject("ExternalSampleDataLabel"), cyan)
     this.setTextStyleTree(this.panel, coolWhite)
     this.findText("SampleDataLabel").textFill.color = cyan
@@ -615,7 +609,6 @@ export class RunCodexUI extends BaseScriptComponent {
     button.onTriggerUp.add(() => {
       this.panel.enabled = true
       this.launcher.enabled = false
-      this.chatGPTControl.enabled = false
       this.refreshState()
     })
 
@@ -640,85 +633,6 @@ export class RunCodexUI extends BaseScriptComponent {
     text.verticalAlignment = VerticalAlignment.Center
     text.layoutRect = Rect.create(-15, 15, -2.5, 2.5)
     this.cue = cue
-    this.createChatGPTLoginControl()
-  }
-
-  private createChatGPTLoginControl(): void {
-    this.chatGPTControl = global.scene.createSceneObject("RunCodexChatGPTLogin")
-    this.chatGPTControl.setParent(this.placementRoot)
-    this.chatGPTControl.createComponent("Component.Canvas")
-    this.chatGPTControl.getTransform().setLocalPosition(new vec3(18, 7, 0))
-
-    const titleObject = global.scene.createSceneObject("RunCodexChatGPTLoginTitle")
-    titleObject.setParent(this.chatGPTControl)
-    titleObject.getTransform().setLocalPosition(new vec3(0, 4.3, 0.3))
-    const title = titleObject.createComponent(ElementContent.getTypeName()) as ElementContent
-    title.text = "CHATGPT · PREVIEW DEMO"
-    title.textSize = 16
-    title.sizeOverride = new vec2(14, 2.8)
-    title.contentAlignment = "center"
-
-    const surfaceObject = global.scene.createSceneObject("RunCodexChatGPTLoginSurface")
-    surfaceObject.setParent(this.chatGPTControl)
-    surfaceObject.getTransform().setLocalPosition(new vec3(0, 0, -0.12))
-    const surface = surfaceObject.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle
-    surface.initialize()
-    surface.size = new vec2(14, 5.4)
-    surface.setBackgroundGradient({
-      enabled: true,
-      type: "Linear",
-      start: new vec2(-1, 1),
-      end: new vec2(1, -1),
-      stop0: {enabled: true, color: new vec4(0.004, 0.02, 0.045, 1), percent: 0},
-      stop1: {enabled: true, color: new vec4(0.012, 0.055, 0.095, 1), percent: 1}
-    })
-    surface.border = true
-    surface.borderType = "Color"
-    surface.borderColor = new vec4(0.08, 0.34, 0.5, 1)
-    surface.borderSize = 0.035
-    surface.opacity = 1
-    surface.renderMeshVisual.enabled = true
-
-    this.chatGPTButton = this.chatGPTControl.createComponent(Button.getTypeName()) as Button
-    this.chatGPTButton.setTheme("SnapOS3", "Secondary")
-    this.chatGPTButton.size = new vec3(14, 5.4, 0.6)
-    this.chatGPTButton.onTriggerUp.add(() => this.onChatGPTDemoButtonAction())
-    this.chatGPTButtonLabel = this.chatGPTControl.createComponent(ElementContent.getTypeName()) as ElementContent
-    this.chatGPTButtonLabel.text = "Start sign-in demo"
-    this.chatGPTButtonLabel.textSize = 27
-    this.chatGPTButtonLabel.sizeOverride = new vec2(13, 4.8)
-    this.chatGPTButtonLabel.contentAlignment = "center"
-
-    const statusObject = global.scene.createSceneObject("RunCodexChatGPTLoginStatus")
-    statusObject.setParent(this.chatGPTControl)
-    statusObject.getTransform().setLocalPosition(new vec3(0, -4.6, 0.3))
-    this.chatGPTStatus = statusObject.createComponent(ElementContent.getTypeName()) as ElementContent
-    this.chatGPTStatus.text = "NO ACCOUNT LINKED"
-    this.chatGPTStatus.textSize = 17
-    this.chatGPTStatus.sizeOverride = new vec2(14, 2.8)
-    this.chatGPTStatus.contentAlignment = "center"
-  }
-
-  private onChatGPTDemoButtonAction(): void {
-    if (this.chatGPTDemoStep === "ready") {
-      this.chatGPTDemoStep = "consent"
-      this.chatGPTButtonLabel.text = "Simulate consent"
-      this.chatGPTStatus.text = "HANDOFF SKIPPED"
-    } else if (this.chatGPTDemoStep === "consent") {
-      this.chatGPTDemoStep = "complete"
-      this.chatGPTButtonLabel.text = "Reset demo"
-      this.chatGPTStatus.text = "SIMULATED · NO ACCOUNT"
-    } else {
-      this.chatGPTDemoStep = "ready"
-      this.chatGPTButtonLabel.text = "Start sign-in demo"
-      this.chatGPTStatus.text = "NO ACCOUNT LINKED"
-    }
-  }
-
-  private showChatGPTControlWithLauncher(): void {
-    if (this.chatGPTControl) {
-      this.chatGPTControl.enabled = this.launcher.enabled && !this.panel.enabled && !this.sessionPicker.enabled
-    }
   }
 
   private createSessionPicker(): void {
@@ -763,7 +677,6 @@ export class RunCodexUI extends BaseScriptComponent {
     const cancel = this.createPickerButton(root, "SessionPickerCancelButton", "Back", -9.8, () => {
       root.enabled = false
       this.panel.enabled = true
-      this.showChatGPTControlWithLauncher()
       this.refreshState()
     })
     const cancelButton = cancel.getComponent(Button.getTypeName()) as Button
@@ -852,7 +765,6 @@ export class RunCodexUI extends BaseScriptComponent {
     this.panel.enabled = false
     this.sessionPicker.enabled = true
     this.launcher.enabled = false
-    this.showChatGPTControlWithLauncher()
     this.sessionChoice = "none"
     this.findText("ApprovalFeedback").text = ""
     this.updateResumeLastButton()
@@ -870,7 +782,6 @@ export class RunCodexUI extends BaseScriptComponent {
     else this.connectLiveBridge()
     this.sessionPicker.enabled = false
     this.panel.enabled = true
-    this.showChatGPTControlWithLauncher()
     this.refreshState()
   }
 
@@ -878,7 +789,6 @@ export class RunCodexUI extends BaseScriptComponent {
     this.sessionChoice = "new"
     this.sessionPicker.enabled = false
     this.panel.enabled = true
-    this.showChatGPTControlWithLauncher()
     this.resetForNewThread()
     this.findText("ApprovalFeedback").text = "Starting a new Codex session…"
     this.refreshState()
@@ -891,7 +801,6 @@ export class RunCodexUI extends BaseScriptComponent {
     this.sessionChoice = "none"
     this.sessionPicker.enabled = false
     this.panel.enabled = true
-    this.showChatGPTControlWithLauncher()
     this.setConnectionLabel(LIVE_CONNECTED_LABEL)
     this.findText("TaskName").text = thread.name || "Codex task"
     this.syncThreadStatus(thread.status)
@@ -1451,7 +1360,6 @@ export class RunCodexUI extends BaseScriptComponent {
     if (this.liveMode) {
       this.panel.enabled = false
       this.launcher.enabled = true
-      this.showChatGPTControlWithLauncher()
       return
     }
     this.state = "Working"
@@ -1467,7 +1375,6 @@ export class RunCodexUI extends BaseScriptComponent {
     this.panel.enabled = false
     this.opaqueBackdrop.enabled = false
     this.launcher.enabled = true
-    this.showChatGPTControlWithLauncher()
     this.refreshState()
   }
 
