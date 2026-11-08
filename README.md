@@ -119,6 +119,6 @@ The project was built in Lens Studio using the CLAD workflow and Lens Studio MCP
 
 - TypeScript compilation and Lens Studio Preview refresh have passed in the current development checkout.
 - User-confirmed in Lens Studio Preview with SPECS 27 selected: the RunCodex experience works, including sending and receiving live Codex messages and handling a real approval request with **Approve** or **Reject**.
-- **ChatGPT sign-in exploration:** We investigated account sign-in, but it is not implemented in this MVP. The sign-in UI prototype has been removed; RunCodex does not perform OAuth, connect to ChatGPT, or sign in to an account.
+- **Codex account sign-in exploration:** We explored and tested signing into a Codex account from Specs. The sign-in flow required for this experience is not currently supported by Codex, so we stopped the experiment. RunCodex does not include account sign-in; live sessions currently connect through the paired Mac's local Codex App Server bridge.
 - Live use still depends on a correctly paired local Codex App Server and private-network bridge setup.
 - The project targets the `Spectacles` platform enum in Lens Studio 5.23.2 and has been tested in Preview with **SPECS 27** selected. Physical Specs device behavior remains unverified.
