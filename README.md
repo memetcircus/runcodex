@@ -1,13 +1,13 @@
 # RunCodex
 
-**A spatial Codex companion for Specs.** RunCodex brings project-scoped Codex sessions into the user's work area. From the session picker, users can resume the latest Codex conversation for the configured project or create a new one, then dictate a follow-up, track progress, and handle real approval requests without returning to a laptop screen.
+**A spatial Codex companion for Specs.** RunCodex brings project-scoped Codex sessions into the user's work area. The session picker shows up to three recent sessions for the configured project, prioritizes sessions waiting for approval, and lets the user resume a chosen session or create a new one. Users can then dictate a follow-up, track progress, and handle real approval requests without returning to a laptop screen.
 
-The Lens uses a small world-locked launcher and an on-demand conversation panel. Choosing **Connect Codex** opens a session picker before the existing conversation panel. **Resume Last Session** opens the most recently updated Codex thread in the configured project; **＋ New Session** creates a fresh Codex App Server thread. Both choices lead to the same voice and approval panel, and a new session starts with an empty conversation and no user prompt. The panel stays at its chosen place as the user turns; a grab bar below the panel lets them move the launcher and panel together. It is designed as a glasses interface, not a web page floating in front of the face.
+The Lens uses a small world-locked launcher and an on-demand conversation panel. Choosing **Connect Codex** opens a session picker before the existing conversation panel. The picker shows up to three recent Codex threads in the configured project; a session with a pending approval is prioritized and visually highlighted. Selecting a session opens that conversation, while **＋ New Session** creates a fresh Codex App Server thread. Both choices lead to the same voice and approval panel, and a new session starts with an empty conversation and no user prompt. The panel stays at its chosen place as the user turns; a grab bar below the panel lets them move the launcher and panel together. It is designed as a glasses interface, not a web page floating in front of the face.
 
 ## What it does
 
 - Opens a **Codex Sessions** picker from **Connect Codex**, before entering the existing conversation panel.
-- Resumes the latest Codex thread scoped to the configured project, or creates a fresh project-scoped thread with **＋ New Session**.
+- Shows up to three recent Codex threads scoped to the configured project, prioritizes and visually pulses sessions with pending approval requests, and resumes the selected thread. **＋ New Session** creates a fresh project-scoped thread.
 - Starts new sessions with an empty conversation; the first user message is entered later using the existing voice-and-send controls.
 - Shows the selected Codex task, live turn status, recent conversation, and completion response.
 - Uses Specs speech recognition for **Speak / Stop** dictation. The user reviews the transcript before pressing **Send**.
@@ -57,8 +57,8 @@ The bridge runs on the paired Mac. It is a development relay, not a hosted servi
 The live flow is:
 
 1. The user opens RunCodex and chooses **Connect Codex**. The Lens pairs with the bridge and opens the **Codex Sessions** picker.
-2. **Resume Last Session** lists the configured project's threads and resumes the most recently updated one. **＋ New Session** calls `thread/start` with the configured project root. This creates a Codex conversation thread, not a separate terminal window.
-3. Both choices open the existing conversation panel. Resuming loads recent user and assistant messages; a new thread starts with a blank conversation and waits for the user's first message.
+2. The picker lists the configured project's recent threads (up to three), prioritizing sessions with a pending approval. Selecting a row resumes that exact thread. **＋ New Session** calls `thread/start` with the configured project root. This creates a Codex conversation thread, not a separate terminal window.
+3. Resuming a selected thread opens the existing conversation panel and loads recent user and assistant messages. A new thread opens the same panel with a blank conversation and waits for the user's first message.
 4. The user dictates a message, reviews the draft, and sends it. The Lens uses `turn/start` for a new turn or `turn/steer` to add to the active turn.
 5. The App Server streams turn status and assistant text through the bridge. The bridge forwards bounded plain-text messages; the Lens updates the conversation as events arrive.
 6. If the App Server requests approval, the bridge forwards that request to the Lens. **Approve** or **Reject** returns the decision for that request to the App Server, and the panel updates when it is resolved.
@@ -92,7 +92,7 @@ The bridge must also be able to reach the Codex App Server. Its default socket l
 ## Try the Lens
 
 - Open **RunCodex** from the world-locked launcher.
-- In the session picker, choose **Resume Last Session** to continue the most recently updated thread in this project's configured root, or choose **＋ New Session** to create a fresh Codex thread. Both choices use the existing conversation panel; a new thread begins blank until the first message is sent.
+- In the session picker, select one of up to three recent threads to resume that conversation, or choose **＋ New Session** to create a fresh Codex thread. Sessions with pending approval requests are prioritized and visually highlighted. Both choices use the existing conversation panel; a new thread begins blank until the first message is sent.
 - In live mode, choose **Speak**, dictate a message, choose **Stop**, review the transcript, then choose **Send**.
 - Read user and Codex messages in the conversation viewport. Long messages can be scrolled without moving the panel or its controls.
 - When the connected Codex task raises a real approval request, review it and choose **Approve** or **Reject**. Sample mode is labeled and does not represent a live Codex approval.
