@@ -73,9 +73,12 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private panel!: SceneObject
   private sessionPicker!: SceneObject
-  private resumeLastButton!: SceneObject
   private sessionChoice: "none" | "resume" | "new" = "none"
-  private latestThreadId = ""
+  private selectedThreadId = ""
+  private sessionListStatusObject!: SceneObject
+  private sessionListStatus!: ElementContent
+  private sessionRows: Array<{sceneObject: SceneObject, button: Button, pendingApproval: boolean}> = []
+  private approvalPulseElapsed = 0
   private launcher!: SceneObject
   private placementRoot!: SceneObject
   private dragHandle!: SceneObject
@@ -187,6 +190,7 @@ export class RunCodexUI extends BaseScriptComponent {
   private liveRpcMethods: {[id: string]: string} = {}
   private reconnectEvent!: DelayedCallbackEvent
   private placementRetryEvent!: DelayedCallbackEvent
+  private sessionListTimeoutEvent!: DelayedCallbackEvent
   private launcherSampleLabel!: ElementContent
 
   onAwake(): void {
@@ -204,6 +208,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.createEvent("UpdateEvent").bind(() => {
       this.updateHandSwipes()
       this.updateWorkingBreath()
+      this.updateSessionApprovalPulse()
     })
     this.createEvent("TouchStartEvent").bind((event: TouchStartEvent) => this.onPreviewTouchStart(event))
     this.createEvent("TouchMoveEvent").bind((event: TouchMoveEvent) => this.onPreviewTouchMove(event))
@@ -227,6 +232,12 @@ export class RunCodexUI extends BaseScriptComponent {
       // The Preview camera can finish its world-tracking pose after OnStart.
       // Re-anchor once after that pose settles, but never move an open panel.
       if (!this.panel.enabled && this.launcher.enabled) this.placeAtCurrentView()
+    })
+    this.sessionListTimeoutEvent = this.createEvent("DelayedCallbackEvent") as DelayedCallbackEvent
+    this.sessionListTimeoutEvent.bind(() => {
+      if (this.sessionPicker.enabled) {
+        this.renderSessionRows([], "Still waiting for Codex. Check the local bridge.")
+      }
     })
     this.sendTimeoutEvent = this.createEvent("DelayedCallbackEvent") as DelayedCallbackEvent
     this.sendTimeoutEvent.bind(() => {
@@ -289,6 +300,10 @@ export class RunCodexUI extends BaseScriptComponent {
         this.liveConnected = true
         this.codexReady = false
         this.setConnectionLabel(LIVE_CONNECTING_LABEL)
+        if (this.sessionPicker.enabled) {
+          this.sessionListTimeoutEvent.enabled = true
+          this.sessionListTimeoutEvent.reset(8)
+        }
         this.sendLiveRpc("initialize", {
           clientInfo: {name: "runcodex_specs", title: "RunCodex for SPECS", version: "0.1.0"}
         })
@@ -298,6 +313,7 @@ export class RunCodexUI extends BaseScriptComponent {
       }
       socket.onerror = () => {
         this.handleBridgeDisconnected()
+        this.liveSocket?.close()
       }
       socket.onclose = () => {
         this.liveThreadId = ""
@@ -316,6 +332,10 @@ export class RunCodexUI extends BaseScriptComponent {
     this.liveConnected = false
     this.codexReady = false
     this.currentTurnId = ""
+    this.sessionListTimeoutEvent.enabled = false
+    if (this.sessionPicker && this.sessionPicker.enabled) {
+      this.renderSessionRows([], "Bridge disconnected. Reconnecting…")
+    }
     this.setConnectionLabel(LIVE_OFFLINE_LABEL)
     if (this.pendingSendRpcId !== null) {
       this.pendingSendRpcId = null
@@ -373,9 +393,15 @@ export class RunCodexUI extends BaseScriptComponent {
         if (method === "initialize") {
           this.codexReady = false
           this.setConnectionLabel(LIVE_OFFLINE_LABEL)
+          if (this.sessionPicker.enabled) this.renderSessionRows([], "Codex connection failed. Retrying…")
           this.refreshState()
+          this.liveSocket?.close()
         }
-        if (method === "thread/list") this.setConnectionLabel("NO TASK IN THIS PROJECT")
+        if (method === "thread/list") {
+          this.sessionListTimeoutEvent.enabled = false
+          this.renderSessionRows([], "Couldn't load project sessions")
+          this.setConnectionLabel("NO TASK IN THIS PROJECT")
+        }
         if ((method === "turn/start" || method === "turn/steer") && this.pendingSendRpcId === Number(message.id)) {
           this.pendingSendRpcId = null
           this.messageDraft = this.pendingSendText
@@ -394,26 +420,25 @@ export class RunCodexUI extends BaseScriptComponent {
           this.sendLiveRpc("thread/start", {})
         } else this.sendLiveRpc("thread/list", {limit: 50})
       } else if (method === "thread/list") {
+        this.sessionListTimeoutEvent.enabled = false
         const threads = message.result?.data || []
-        this.latestThreadId = threads[0]?.id || ""
-        this.updateResumeLastButton()
+        const pendingApprovalThread = threads.find((candidate: any) =>
+          Array.isArray(candidate.status?.activeFlags) && candidate.status.activeFlags.includes("waitingOnApproval")
+        )
+        this.renderSessionRows(threads)
         if (this.sessionChoice !== "resume") return
         if (threads.length === 0) {
           this.findText("ApprovalFeedback").text = "No previous session found. Choose ＋ New Session."
           this.sessionChoice = "none"
           return
         }
-        // Prefer an approval that is already waiting in this project. The
-        // first item can be an unrelated, recently active task and hide it.
-        const thread = threads.find((candidate: any) =>
-          Array.isArray(candidate.status?.activeFlags) && candidate.status.activeFlags.includes("waitingOnApproval")
-        ) || threads[0]
+        const thread = threads.find((candidate: any) => candidate.id === this.selectedThreadId)
+          || pendingApprovalThread
+          || threads[0]
         this.activateThread(thread)
       } else if (method === "thread/start") {
         const thread = message.result?.thread
         if (!thread?.id) return
-        this.latestThreadId = thread.id
-        this.updateResumeLastButton()
         this.resetForNewThread()
         this.activateThread(thread)
       } else if (method === "thread/turns/list") {
@@ -666,24 +691,31 @@ export class RunCodexUI extends BaseScriptComponent {
     title.horizontalAlignment = HorizontalAlignment.Center
     title.verticalAlignment = VerticalAlignment.Center
     title.layoutRect = Rect.create(-13, 13, -2, 2)
-    this.createPickerButton(root, "NewSessionButton", "＋  New Session", 5.3, () => this.startNewSession())
-    this.resumeLastButton = this.createPickerButton(root, "ResumeLastSessionButton", "Resume Last Session", 0.2, () => this.resumeLastSession())
-    this.createPickerButton(root, "DisconnectCodexButton", "Disconnect Codex", -4.9, () => {
+    this.sessionListStatusObject = global.scene.createSceneObject("SessionListStatus")
+    this.sessionListStatusObject.setParent(root)
+    this.sessionListStatusObject.getTransform().setLocalPosition(new vec3(0, 3.6, 0.5))
+    this.sessionListStatus = this.sessionListStatusObject.createComponent(ElementContent.getTypeName()) as ElementContent
+    this.sessionListStatus.text = "Loading project sessions…"
+    this.sessionListStatus.textSize = 24
+    this.sessionListStatus.sizeOverride = new vec2(21, 3.1)
+    this.sessionListStatus.contentAlignment = "center"
+
+    this.createPickerButton(root, "NewSessionButton", "＋  New Session", -4.6, () => this.startNewSession(), 3.1, 27)
+    this.createPickerButton(root, "DisconnectCodexButton", "Disconnect Codex", -8.3, () => {
       this.disconnectCodex()
       root.enabled = false
       this.panel.enabled = true
       this.refreshState()
-    })
-    const cancel = this.createPickerButton(root, "SessionPickerCancelButton", "Back", -9.8, () => {
+    }, 3.1, 25)
+    const cancel = this.createPickerButton(root, "SessionPickerCancelButton", "Back", -11.7, () => {
       root.enabled = false
       this.panel.enabled = true
       this.refreshState()
-    })
+    }, 3, 25)
     const cancelButton = cancel.getComponent(Button.getTypeName()) as Button
     cancelButton.setTheme("SnapOS3", "Ghost")
     this.createSessionPickerDragHandle(root)
     this.sessionPicker = root
-    this.updateResumeLastButton()
   }
 
   private createSessionPickerDragHandle(parent: SceneObject): void {
@@ -737,28 +769,76 @@ export class RunCodexUI extends BaseScriptComponent {
     manipulation.onManipulationEnd.add(() => setHighlight(false))
   }
 
-  private createPickerButton(parent: SceneObject, name: string, text: string, y: number, action: () => void): SceneObject {
+  private createPickerButton(
+    parent: SceneObject,
+    name: string,
+    text: string,
+    y: number,
+    action: () => void,
+    height = 4.1,
+    textSize = 34
+  ): SceneObject {
     const object = global.scene.createSceneObject(name)
     object.setParent(parent)
     object.getTransform().setLocalPosition(new vec3(0, y, 0.4))
     const button = object.createComponent(Button.getTypeName()) as Button
     button.setTheme("SnapOS3", "Secondary")
-    button.size = new vec3(22, 4.1, 1)
+    button.size = new vec3(22, height, 1)
     button.onTriggerUp.add(action)
     const label = object.createComponent(ElementContent.getTypeName()) as ElementContent
     label.text = text
-    label.textSize = 34
-    label.sizeOverride = new vec2(21, 3.6)
+    label.textSize = textSize
+    label.sizeOverride = new vec2(21, height - 0.5)
     label.contentAlignment = "center"
     return object
   }
 
-  private updateResumeLastButton(): void {
-    if (!this.resumeLastButton) return
-    const button = this.resumeLastButton.getComponent(Button.getTypeName()) as Button
-    button.inactive = this.latestThreadId.length === 0
-    const label = this.resumeLastButton.getComponent(ElementContent.getTypeName()) as ElementContent
-    label.text = this.latestThreadId ? "Resume Last Session" : "No Previous Session"
+  private renderSessionRows(threads: any[], emptyMessage = "No previous sessions for this project."): void {
+    this.sessionRows.forEach(row => row.sceneObject.destroy())
+    this.sessionRows = []
+    this.approvalPulseElapsed = 0
+
+    const pendingThreads = threads.filter((thread: any) =>
+      Array.isArray(thread.status?.activeFlags) && thread.status.activeFlags.includes("waitingOnApproval")
+    )
+    const pendingIds = new Set(pendingThreads.map((thread: any) => thread.id))
+    const recentThreads = threads.filter((thread: any) => !pendingIds.has(thread.id))
+    const visibleThreads = [...pendingThreads, ...recentThreads].slice(0, 3)
+    const rowYPositions = [7.1, 3.5, -0.1]
+
+    this.sessionListStatusObject.enabled = visibleThreads.length === 0
+    this.sessionListStatus.text = emptyMessage
+    visibleThreads.forEach((thread: any, index: number) => {
+      const pendingApproval = pendingIds.has(thread.id)
+      const fallbackName = thread.id ? "Session " + String(thread.id).slice(0, 8) : "Untitled Codex session"
+      const rawName = String(thread.name || fallbackName)
+      const name = rawName.replace(/<[^>]*>/g, "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 36) || fallbackName
+      const label = pendingApproval ? "APPROVAL PENDING · " + name : name
+      const sceneObject = this.createPickerButton(
+        this.sessionPicker,
+        "CodexSessionRow" + index,
+        label,
+        rowYPositions[index],
+        () => this.resumeSession(thread.id),
+        3.1,
+        23
+      )
+      const button = sceneObject.getComponent(Button.getTypeName()) as Button
+      this.sessionRows.push({sceneObject, button, pendingApproval})
+    })
+  }
+
+  private updateSessionApprovalPulse(): void {
+    if (!this.sessionPicker || !this.sessionPicker.enabled) {
+      this.approvalPulseElapsed = 0
+      this.sessionRows.forEach(row => row.button.opacity = 1)
+      return
+    }
+    this.approvalPulseElapsed += getDeltaTime()
+    const pulse = (Math.sin((this.approvalPulseElapsed / 1.2) * Math.PI * 2 - Math.PI / 2) + 1) * 0.5
+    this.sessionRows.forEach(row => {
+      row.button.opacity = row.pendingApproval ? 0.2 + pulse * 0.8 : 1
+    })
   }
 
   private openSessionPicker(): void {
@@ -766,8 +846,11 @@ export class RunCodexUI extends BaseScriptComponent {
     this.sessionPicker.enabled = true
     this.launcher.enabled = false
     this.sessionChoice = "none"
+    this.selectedThreadId = ""
+    this.renderSessionRows([], "Loading project sessions…")
+    this.sessionListTimeoutEvent.enabled = true
+    this.sessionListTimeoutEvent.reset(8)
     this.findText("ApprovalFeedback").text = ""
-    this.updateResumeLastButton()
     if (this.liveConnected && this.codexReady) this.sendLiveRpc("thread/list", {limit: 50})
     else {
       this.sessionChoice = "none"
@@ -776,8 +859,9 @@ export class RunCodexUI extends BaseScriptComponent {
     }
   }
 
-  private resumeLastSession(): void {
+  private resumeSession(threadId: string): void {
     this.sessionChoice = "resume"
+    this.selectedThreadId = threadId
     if (this.liveConnected && this.codexReady) this.sendLiveRpc("thread/list", {limit: 50})
     else this.connectLiveBridge()
     this.sessionPicker.enabled = false
@@ -787,6 +871,7 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private startNewSession(): void {
     this.sessionChoice = "new"
+    this.selectedThreadId = ""
     this.sessionPicker.enabled = false
     this.panel.enabled = true
     this.resetForNewThread()
@@ -798,6 +883,7 @@ export class RunCodexUI extends BaseScriptComponent {
 
   private activateThread(thread: any): void {
     this.liveThreadId = thread.id
+    this.selectedThreadId = thread.id
     this.sessionChoice = "none"
     this.sessionPicker.enabled = false
     this.panel.enabled = true
@@ -812,6 +898,7 @@ export class RunCodexUI extends BaseScriptComponent {
     this.liveThreadId = ""
     this.liveApprovalId = null
     this.liveApprovalMethod = ""
+    this.selectedThreadId = ""
     this.currentTurnId = ""
     this.lastUserMessage = ""
     this.lastUserMessageText.text = ""
@@ -1398,6 +1485,8 @@ export class RunCodexUI extends BaseScriptComponent {
     this.liveThreadId = ""
     this.liveApprovalId = null
     this.liveApprovalMethod = ""
+    this.selectedThreadId = ""
+    this.renderSessionRows([], "Connect to Codex to load project sessions.")
     this.setConnectionLabel(LIVE_OFFLINE_LABEL)
     this.refreshState()
     this.updateLiveContentView()
